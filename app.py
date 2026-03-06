@@ -49,7 +49,7 @@ NLLB_MODEL      = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, tru
 NLLB_SRC_LANG   = "eng_Latn"
 NLLB_TGT_LANG   = "por_Latn"   # Brazilian Portuguese in NLLB's FLORES-200 code
 
-OPENROUTER_MODEL = "mistralai/mistral-7b-instruct"   # cheap, excellent PT-BR
+OPENROUTER_MODEL = "google/gemini-2.0-flash-001"  # $0.10/M input, $0.40/M output — ~$0.002 per 10min video
 OPENROUTER_BASE  = "https://openrouter.ai/api/v1"
 
 JOB_MAX_AGE_H  = 2       # hours before a stale job folder is eligible for cleanup
@@ -146,7 +146,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     # ── Step 1: probe title/duration without downloading ─────────────────────
     title, duration = "video", 0
     try:
-        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:  # type: ignore[arg-type]
+        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:
             info = ydl.extract_info(url, download=False)
             title    = info.get("title", "video")
             duration = info.get("duration", 0)
@@ -171,7 +171,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         try:
             opts = {**BASE_OPTS, "format": fmt,
                     "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
-            with yt.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
+            with yt.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
             if candidates:
@@ -220,7 +220,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
                         "preferredquality": "0",
                     }],
                 }
-                with yt.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
+                with yt.YoutubeDL(opts) as ydl:
                     ydl.extract_info(url, download=True)
                 candidates = list(job_dir.glob("audio_raw.*"))
                 if candidates:
@@ -270,55 +270,55 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
 # the perceptible difference in everyday spoken content.
 _PTPT_TO_PTBR = [
     # Pronouns / address
-    (r"tu",            "você"),
-    (r"te",            "te"),          # keep — both use "te" but context helps
-    (r"teu",           "seu"),
-    (r"tua",           "sua"),
-    (r"teus",          "seus"),
-    (r"tuas",          "suas"),
-    (r"vós",           "vocês"),
+    (r"tu",            "você"),
+    (r"te",            "te"),          # keep — both use "te" but context helps
+    (r"teu",           "seu"),
+    (r"tua",           "sua"),
+    (r"teus",          "seus"),
+    (r"tuas",          "suas"),
+    (r"vós",           "vocês"),
     # Verb forms — 2nd person → 3rd person (você paradigm)
-    (r"estás",         "está"),
-    (r"gostavas",      "gostava"),
-    (r"gostas",        "gosta"),
-    (r"fazes",         "faz"),
-    (r"podes",         "pode"),
-    (r"queres",        "quer"),
-    (r"sabes",         "sabe"),
-    (r"tens",          "tem"),
-    (r"vens",          "vem"),
-    (r"dizes",         "diz"),
-    (r"vês",           "vê"),
-    (r"vais",          "vai"),
-    (r"ficas",         "fica"),
-    (r"perceber",      "entender"),
+    (r"estás",         "está"),
+    (r"gostavas",      "gostava"),
+    (r"gostas",        "gosta"),
+    (r"fazes",         "faz"),
+    (r"podes",         "pode"),
+    (r"queres",        "quer"),
+    (r"sabes",         "sabe"),
+    (r"tens",          "tem"),
+    (r"vens",          "vem"),
+    (r"dizes",         "diz"),
+    (r"vês",           "vê"),
+    (r"vais",          "vai"),
+    (r"ficas",         "fica"),
+    (r"perceber",      "entender"),
     # Gerund — PT-PT uses infinitive constructions, PT-BR uses gerund
     # "a verificar" → "verificando", "a fazer" → "fazendo" etc.
-    (r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
+    (r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
      lambda m: m.group(1) + "ndo"),
     # Specific common phrases
-    (r"miúdos",        "crianças"),
-    (r"fixe",          "legal"),
-    (r"giro",          "bonito"),
-    (r"chato",         "chato"),   # same but keep
-    (r"propriamente",  "corretamente"),
-    (r"sempre que",    "sempre que"),
-    (r"certamente",    "certamente"),
-    (r"apenas",        "só"),
-    (r"somente",       "só"),
-    (r"imensamente",   "muito"),
-    (r"imenso",        "enorme"),
-    (r"autocarro",     "ônibus"),
-    (r"comboio",       "trem"),
-    (r"telemovel",     "celular"),
-    (r"telemovel",     "celular"),
-    (r"telemóvel",     "celular"),
-    (r"passeio",       "calçada"),
-    (r"petróleos",     "petróleo"),
-    (r"casas de banho","banheiros"),
-    (r"casa de banho", "banheiro"),
-    (r"saneamento",    "saneamento"),
-    (r"futebol",       "futebol"),  # same
+    (r"miúdos",        "crianças"),
+    (r"fixe",          "legal"),
+    (r"giro",          "bonito"),
+    (r"chato",         "chato"),   # same but keep
+    (r"propriamente",  "corretamente"),
+    (r"sempre que",    "sempre que"),
+    (r"certamente",    "certamente"),
+    (r"apenas",        "só"),
+    (r"somente",       "só"),
+    (r"imensamente",   "muito"),
+    (r"imenso",        "enorme"),
+    (r"autocarro",     "ônibus"),
+    (r"comboio",       "trem"),
+    (r"telemovel",     "celular"),
+    (r"telemovel",     "celular"),
+    (r"telemóvel",     "celular"),
+    (r"passeio",       "calçada"),
+    (r"petróleos",     "petróleo"),
+    (r"casas de banho","banheiros"),
+    (r"casa de banho", "banheiro"),
+    (r"saneamento",    "saneamento"),
+    (r"futebol",       "futebol"),  # same
 ]
 
 def _ptpt_to_ptbr(text: str) -> str:
@@ -329,7 +329,7 @@ def _ptpt_to_ptbr(text: str) -> str:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         else:
             # Preserve capitalisation of the first letter
-            def _replace(m: re.Match[str], repl: str = replacement) -> str:
+            def _replace(m, repl=replacement):
                 if m.group(0)[0].isupper():
                     return repl[0].upper() + repl[1:]
                 return repl
@@ -359,8 +359,7 @@ def _get_nllb_pipeline(logs: list):
         tgt_lang=NLLB_TGT_LANG,
         device=device,
         max_length=512,
-        forced_bos_token_id=None,   # let src/tgt lang control output
-    )
+    )  # tgt_lang already sets forced_bos_token_id internally; do not pass it again
     logs = log(f"   NLLB-200 loaded on {'GPU' if device == 0 else 'CPU'}", logs)
     return _nllb_pipeline, logs
 
@@ -374,7 +373,7 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         outputs = pipe(batch, batch_size=min(8, len(batch)))
-        results.extend(o["translation_text"] for o in outputs)  # type: ignore[index]
+        results.extend(o["translation_text"] for o in outputs)
 
     # Post-process: convert remaining PT-PT markers to PT-BR
     results = [_ptpt_to_ptbr(t) for t in results]
@@ -784,7 +783,7 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, bro
         yield None, "\n".join(logs)
 
         progress(0.4, desc="Translating…")
-        translated, logs = translate_segments(list(segments), logs, openrouter_key=openrouter_key)
+        translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key)
         yield None, "\n".join(logs)
 
         progress(0.55, desc="Synthesizing voice…")
@@ -796,7 +795,7 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, bro
 
         progress(0.85, desc="Assembling video…")
         output_path, logs = assemble_dubbed_video(
-            video_path, timed_clips, float(duration or 0), job_dir, title or "video", logs
+            video_path, timed_clips, duration, job_dir, title, logs
         )
         progress(1.0, desc="Done!")
         yield output_path, "\n".join(logs)
@@ -1101,12 +1100,12 @@ def build_ui():
         with gr.Accordion("🔑 OpenRouter API Key (fallback translation)", open=False):
             gr.HTML("""
             <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
-              Primary translation uses <strong style="color:#e8e8f0;">NLLB-200</strong> locally on your GPU — true PT-BR, zero cost.<br>
-              If NLLB-200 fails (e.g. out of VRAM), Dubweave will automatically retry<br>
-              via <strong style="color:#e8e8f0;">OpenRouter</strong> using <code style="color:#a99dff;">mistralai/mistral-7b-instruct</code>.<br>
+              <strong style="color:#00e5a0;">If a key is provided</strong>, OpenRouter is used <strong style="color:#e8e8f0;">first</strong> — it follows explicit PT-BR instructions and produces the best output.<br>
+              Model: <code style="color:#a99dff;">google/gemini-2.0-flash-001</code>.<br>
+              A 10-min video costs roughly <strong style="color:#00e5a0;">~$0.002</strong> via OpenRouter.<br>
               <br>
-              A 10-minute video costs roughly <strong style="color:#00e5a0;">$0.0002</strong> via OpenRouter.<br>
-              Leave empty to disable the fallback (NLLB failure will raise an error instead).
+              If no key is given (or OpenRouter fails), <strong style="color:#e8e8f0;">NLLB-200</strong> runs locally on your GPU as fallback.<br>
+              Leave empty to use NLLB-200 only.
             </div>
             """)
             openrouter_key_input = gr.Textbox(
