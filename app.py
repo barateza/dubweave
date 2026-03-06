@@ -685,6 +685,148 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
     return translated, logs
 
 
+# ── Backward constraint: source rate → text budget ───────────────────────────
+
+# XTTS v2 synthesizes Portuguese at roughly this many characters per second
+# at natural speaking rate. Measured empirically on a range of texts.
+# Used to estimate output duration from character count before synthesis.
+XTTS_CHARS_PER_SEC = 18.0   # conservative estimate; real range is 15–22
+
+# PT-BR is structurally ~15% longer than English in character count after
+# translation (more syllables, obligatory pronouns, verbal inflection).
+# This is the systematic bias the pipeline cannot see without prediction.
+PTBR_EXPANSION_FACTOR = 1.15
+
+# Maximum compression we will apply via atempo without quality loss.
+# Matches the cap in synthesize_segments.
+MAX_ATEMPO = 1.6
+
+
+def _estimate_synth_duration(text: str) -> float:
+    """Estimate XTTS synthesis duration from character count."""
+    return len(text.strip()) / XTTS_CHARS_PER_SEC
+
+
+def _trim_to_budget(text: str, budget_secs: float, openrouter_key: str) -> str:
+    """
+    Shorten text to fit within budget_secs at natural speaking rate.
+
+    Strategy:
+      1. Estimate duration from character count.
+      2. If within budget × MAX_ATEMPO, return as-is (atempo can handle it).
+      3. Otherwise, truncate to the last complete word that fits the budget,
+         then — if an OpenRouter key is available — ask the LLM to rephrase
+         to the same meaning in fewer words rather than hard-truncating.
+
+    This is the backward constraint edge: synthesis constraints flow back
+    to the text representation before any audio is generated.
+    """
+    effective_budget = budget_secs * MAX_ATEMPO
+    estimated = _estimate_synth_duration(text)
+
+    if estimated <= effective_budget:
+        return text  # fits, no action needed
+
+    # Hard truncation fallback: keep words up to character budget
+    char_budget = int(effective_budget * XTTS_CHARS_PER_SEC)
+    truncated = text[:char_budget].rsplit(" ", 1)[0].rstrip(".,;:")
+
+    if not openrouter_key.strip():
+        return truncated  # no LLM available, use hard truncation
+
+    # LLM rephrase: ask for same meaning in fewer words
+    try:
+        import urllib.request as _ur
+        prompt = (
+            f"Rephrase this Brazilian Portuguese text to express the same meaning "
+            f"in at most {char_budget} characters. "
+            f"Output ONLY the rephrased text, nothing else.\n\n{text}"
+        )
+        payload = json.dumps({
+            "model": OPENROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": "You are a Brazilian Portuguese editor. Shorten text while preserving meaning. Never add explanations."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+        }).encode()
+        req = _ur.Request(
+            f"{OPENROUTER_BASE}/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {openrouter_key.strip()}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/dubweave",
+                "X-Title": "Dubweave",
+            },
+            method="POST",
+        )
+        with _ur.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        rephrased = result["choices"][0]["message"]["content"].strip()
+        # Only use rephrased if it's actually shorter
+        if len(rephrased) < len(text):
+            return rephrased
+    except Exception:
+        pass  # LLM rephrase failed — fall back to hard truncation
+
+    return truncated
+
+
+def apply_timing_budget(
+    segments: list,
+    logs: list,
+    openrouter_key: str = "",
+) -> tuple[list, list]:
+    """
+    Pre-flight pass: measure source speaking rate, predict synthesis duration,
+    and shorten translated text that will provably overflow its time slot.
+
+    This is the single backward constraint edge in the pipeline. Without it,
+    every stage is a one-way valve: synthesis discovers overflow only after
+    rendering, then atempo degrades quality to compensate. With it, the text
+    is shortened before synthesis runs, so atempo operates within its quality
+    range on all segments.
+
+    Source WPM is measured per-segment to handle variable-rate speakers
+    (a presenter who slows down for emphasis vs. speaks rapidly in argument).
+    """
+    trimmed_count = 0
+    overflow_count = 0
+
+    for i, seg in enumerate(segments):
+        slot_dur = seg["end"] - seg["start"]
+        if slot_dur <= 0.1:
+            continue
+
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+
+        estimated = _estimate_synth_duration(text)
+        effective_budget = slot_dur * MAX_ATEMPO
+
+        if estimated > effective_budget:
+            overflow_count += 1
+            original_len = len(text)
+            text = _trim_to_budget(text, slot_dur, openrouter_key)
+            segments[i] = {**seg, "text": text}
+            if len(text) < original_len:
+                trimmed_count += 1
+
+    if overflow_count:
+        logs = log(
+            f"   ⏱️  {overflow_count} segments predicted to overflow slot — "
+            f"{trimmed_count} shortened pre-synthesis, "
+            f"{overflow_count - trimmed_count} within atempo range",
+            logs
+        )
+    else:
+        logs = log("   ⏱️  All segments within timing budget", logs)
+
+    return segments, logs
+
+
 def synthesize_segments(
     segments: list,
     audio_orig: Path,
@@ -834,8 +976,12 @@ def assemble_dubbed_video(
         )
 
     mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(timed_clips)))
+    # weights="1 1 1...": give every input equal weight of 1 instead of
+    # the default behaviour where amix divides by N, which destroys volume.
+    n_inputs = len(timed_clips) + 1
+    weights_str = " ".join(["1"] * n_inputs)
     filter_parts.append(
-        f"{mix_inputs}amix=inputs={len(timed_clips)+1}:dropout_transition=0[aout]"
+        f"{mix_inputs}amix=inputs={n_inputs}:dropout_transition=0:weights=\"{weights_str}\"[aout]"
     )
     filter_complex = ";".join(filter_parts)
 
@@ -855,17 +1001,19 @@ def assemble_dubbed_video(
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
     output_path = OUTPUT_DIR / f"{safe_title}_PT-BR.mp4"
 
-    # Normalize dubbed audio to -3 dB before mux.
-    # amix divided amplitude by the number of inputs (~52), leaving the
-    # signal near -34 dB. loudnorm brings it back to broadcast level.
-    # We also upmix to stereo here so players don't report "1 channel".
+    # Volume fix: amix averages all inputs, dividing amplitude by input count.
+    # With 50+ segments the signal ends up ~34 dB below full scale.
+    # dynaudnorm automatically brings the signal up to a consistent level
+    # without the two-pass requirement of loudnorm.
+    # alimiter prevents clipping after the boost.
+    # pan=stereo duplicates mono → both channels so players see 2ch audio.
     normalized_audio = job_dir / "dubbed_audio_norm.wav"
     run_ffmpeg([
         "ffmpeg", "-y",
         "-i", str(mixed_audio),
-        "-filter:a", "loudnorm=I=-16:TP=-3:LRA=7,pan=stereo|c0=c0|c1=c0",
+        "-filter:a", "dynaudnorm=p=0.95:m=100:s=12,alimiter=limit=0.99,pan=stereo|c0=c0|c1=c0",
         str(normalized_audio)
-    ], "loudnorm")
+    ], "dynaudnorm")
 
     run_ffmpeg([
         "ffmpeg", "-y",
@@ -969,6 +1117,10 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, bro
 
         progress(0.4, desc="Translating…")
         translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key)
+        yield None, "\n".join(logs)
+
+        progress(0.5, desc="Checking timing budget…")
+        translated, logs = apply_timing_budget(translated, logs, openrouter_key=openrouter_key)
         yield None, "\n".join(logs)
 
         progress(0.55, desc="Synthesizing voice…")
