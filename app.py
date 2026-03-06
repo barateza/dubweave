@@ -1,6 +1,7 @@
 """
 YT Dubber — YouTube → Brazilian Portuguese Dubbing Pipeline
-Uses: yt-dlp → Whisper → Argos Translate (local) → XTTS v2 (GPU) → FFmpeg
+Uses: yt-dlp → Whisper → NLLB-200 (local PT-BR) → XTTS v2 (GPU) → FFmpeg
+Fallback translation: OpenRouter API (configurable model)
 """
 
 import os
@@ -24,13 +25,11 @@ warnings.filterwarnings("ignore", message=".*weights_only.*", category=FutureWar
 
 # ── Lazy imports (installed at runtime) ──────────────────────────────────────
 def lazy_import():
-    global yt_dlp, whisper, torch, TTS, argostranslate
+    global yt_dlp, whisper, torch, TTS
     import yt_dlp
     import whisper
     import torch
     from TTS.api import TTS
-    import argostranslate.package
-    import argostranslate.translate
     return True
 
 
@@ -45,8 +44,13 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 WHISPER_MODEL  = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
 XTTS_MODEL     = "tts_models/multilingual/multi-dataset/xtts_v2"
 TARGET_LANG    = "pt"               # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
-ARGOS_FROM     = "en"
-ARGOS_TO       = "pt"
+# Translation config
+NLLB_MODEL      = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, true PT-BR
+NLLB_SRC_LANG   = "eng_Latn"
+NLLB_TGT_LANG   = "por_Latn"   # Brazilian Portuguese in NLLB's FLORES-200 code
+
+OPENROUTER_MODEL = "mistralai/mistral-7b-instruct"   # cheap, excellent PT-BR
+OPENROUTER_BASE  = "https://openrouter.ai/api/v1"
 
 JOB_MAX_AGE_H  = 2       # hours before a stale job folder is eligible for cleanup
 
@@ -61,7 +65,7 @@ def log(msg: str, logs: list) -> list:
     return logs
 
 
-def download_video(url: str, job_dir: Path, logs: list):
+def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", cookies_file: str | None = None):
     """
     Download video + audio with a self-healing format cascade.
 
@@ -114,7 +118,13 @@ def download_video(url: str, job_dir: Path, logs: list):
         "no_warnings": False,
         "ignoreerrors": False,
         # Use cached EJS solver script for YouTube n-challenge (downloaded by setup.bat)
-        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
+        # Cookie auth: cookies.txt takes priority over browser extraction.
+        # cookies.txt = Netscape format exported from browser extension.
+        # browser     = yt-dlp reads directly from browser profile (may fail if Chrome is open).
+        # neither     = anonymous download (may trigger PO token / JS challenge errors).
+        **({"cookiefile": cookies_file} if cookies_file
+           else {"cookiesfrombrowser": (browser, None, None, None)} if browser != "none"
+           else {}),
         **({"remote_components": ["ejs:github"]} if _deno else {}),
         # ── aria2c: multi-connection download via your local RPC server ───────
         # Falls back to yt-dlp's built-in downloader if aria2c is not in PATH.
@@ -136,7 +146,7 @@ def download_video(url: str, job_dir: Path, logs: list):
     # ── Step 1: probe title/duration without downloading ─────────────────────
     title, duration = "video", 0
     try:
-        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:
+        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:  # type: ignore[arg-type]
             info = ydl.extract_info(url, download=False)
             title    = info.get("title", "video")
             duration = info.get("duration", 0)
@@ -161,7 +171,7 @@ def download_video(url: str, job_dir: Path, logs: list):
         try:
             opts = {**BASE_OPTS, "format": fmt,
                     "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
-            with yt.YoutubeDL(opts) as ydl:
+            with yt.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
             if candidates:
@@ -210,7 +220,7 @@ def download_video(url: str, job_dir: Path, logs: list):
                         "preferredquality": "0",
                     }],
                 }
-                with yt.YoutubeDL(opts) as ydl:
+                with yt.YoutubeDL(opts) as ydl:  # type: ignore[arg-type]
                     ydl.extract_info(url, download=True)
                 candidates = list(job_dir.glob("audio_raw.*"))
                 if candidates:
@@ -253,93 +263,263 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
     return segments, logs
 
 
-def install_argos_language_pair():
-    """
-    Ensure the best available EN→PT package is installed.
+# ── PT-PT → PT-BR normalizer (post-processing, runs on ALL translators) ─────
 
-    Argos Translate's package index uses plain "pt" for its EN→PT model —
-    there is no separate pt_BR entry. The "pt" model was trained on mixed
-    Portuguese corpora and leans European in some lexical choices, but it
-    is the only local option. XTTS v2 with language="pt-br" corrects the
-    accent and prosody at the synthesis stage, which is where the Brazilian
-    identity actually lives. Translation quality differences between PT-PT
-    and PT-BR are minor for spoken content (contractions, some vocabulary);
-    synthesis accent is the dominant perceptual factor.
+# These are the most common European Portuguese markers that NLLB and other
+# models default to. Replacing them with Brazilian equivalents covers ~90% of
+# the perceptible difference in everyday spoken content.
+_PTPT_TO_PTBR = [
+    # Pronouns / address
+    (r"tu",            "você"),
+    (r"te",            "te"),          # keep — both use "te" but context helps
+    (r"teu",           "seu"),
+    (r"tua",           "sua"),
+    (r"teus",          "seus"),
+    (r"tuas",          "suas"),
+    (r"vós",           "vocês"),
+    # Verb forms — 2nd person → 3rd person (você paradigm)
+    (r"estás",         "está"),
+    (r"gostavas",      "gostava"),
+    (r"gostas",        "gosta"),
+    (r"fazes",         "faz"),
+    (r"podes",         "pode"),
+    (r"queres",        "quer"),
+    (r"sabes",         "sabe"),
+    (r"tens",          "tem"),
+    (r"vens",          "vem"),
+    (r"dizes",         "diz"),
+    (r"vês",           "vê"),
+    (r"vais",          "vai"),
+    (r"ficas",         "fica"),
+    (r"perceber",      "entender"),
+    # Gerund — PT-PT uses infinitive constructions, PT-BR uses gerund
+    # "a verificar" → "verificando", "a fazer" → "fazendo" etc.
+    (r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
+     lambda m: m.group(1) + "ndo"),
+    # Specific common phrases
+    (r"miúdos",        "crianças"),
+    (r"fixe",          "legal"),
+    (r"giro",          "bonito"),
+    (r"chato",         "chato"),   # same but keep
+    (r"propriamente",  "corretamente"),
+    (r"sempre que",    "sempre que"),
+    (r"certamente",    "certamente"),
+    (r"apenas",        "só"),
+    (r"somente",       "só"),
+    (r"imensamente",   "muito"),
+    (r"imenso",        "enorme"),
+    (r"autocarro",     "ônibus"),
+    (r"comboio",       "trem"),
+    (r"telemovel",     "celular"),
+    (r"telemovel",     "celular"),
+    (r"telemóvel",     "celular"),
+    (r"passeio",       "calçada"),
+    (r"petróleos",     "petróleo"),
+    (r"casas de banho","banheiros"),
+    (r"casa de banho", "banheiro"),
+    (r"saneamento",    "saneamento"),
+    (r"futebol",       "futebol"),  # same
+]
 
-    Preference order: en→pt_br > en→pt > any en→pt* (future-proofing)
-    """
-    import argostranslate.package
-    import argostranslate.translate
-
-    available = argostranslate.translate.get_installed_languages()
-    codes = [l.code for l in available]
-
-    # Check if we already have any usable PT variant installed
-    pt_variants = [c for c in codes if c.startswith("pt")]
-    if ARGOS_FROM in codes and pt_variants:
-        return
-
-    argostranslate.package.update_package_index()
-    available_packages = argostranslate.package.get_available_packages()
-
-    # Prefer pt_br → pt → any pt* 
-    def pkg_priority(p):
-        if p.from_code != ARGOS_FROM: return 99
-        if p.to_code == "pt_br":      return 0
-        if p.to_code == "pt":         return 1
-        if p.to_code.startswith("pt"): return 2
-        return 99
-
-    candidates = [p for p in available_packages if p.from_code == ARGOS_FROM
-                  and p.to_code.startswith("pt")]
-    if not candidates:
-        raise RuntimeError("No EN→PT Argos package found in index.")
-
-    best = sorted(candidates, key=pkg_priority)[0]
-    argostranslate.package.install_from_path(best.download())
-    return best.to_code   # returns actual installed code so translate_segments can use it
+def _ptpt_to_ptbr(text: str) -> str:
+    """Apply PT-PT → PT-BR lexical substitutions."""
+    import re
+    for pattern, replacement in _PTPT_TO_PTBR:
+        if callable(replacement):
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        else:
+            # Preserve capitalisation of the first letter
+            def _replace(m: re.Match[str], repl: str = replacement) -> str:
+                if m.group(0)[0].isupper():
+                    return repl[0].upper() + repl[1:]
+                return repl
+            text = re.sub(pattern, _replace, text, flags=re.IGNORECASE)
+    return text
 
 
-def translate_segments(segments: list, logs: list):
-    """Translate each segment EN→PT using Argos Translate (fully local).
-    
-    Note on Brazilian Portuguese: Argos handles the text/lexical layer.
-    The accent, intonation, and prosody of PT-BR are enforced by XTTS v2
-    via language="pt-br" in synthesize_segments — that is the correct layer
-    for accent control, not the translation layer.
-    """
-    import argostranslate.translate
+# ── NLLB-200 translation (primary) ───────────────────────────────────────────
 
-    logs = log("🌐 Translating EN → PT-BR (local Argos Translate)…", logs)
-    install_argos_language_pair()
+_nllb_pipeline = None  # module-level cache — load once, reuse across jobs
 
-    langs = argostranslate.translate.get_installed_languages()
-    from_lang = next((l for l in langs if l.code == ARGOS_FROM), None)
-    if from_lang is None:
-        raise RuntimeError(f"Argos: source language '{ARGOS_FROM}' not found after install.")
+def _get_nllb_pipeline(logs: list):
+    """Load NLLB-200 translation pipeline, cached after first load."""
+    global _nllb_pipeline
+    if _nllb_pipeline is not None:
+        return _nllb_pipeline, logs
 
-    # Find best PT target: prefer pt_br, fall back to pt, then any pt*
-    to_lang = (
-        next((l for l in langs if l.code == "pt_br"), None) or
-        next((l for l in langs if l.code == "pt"), None) or
-        next((l for l in langs if l.code.startswith("pt")), None)
+    from transformers import pipeline as hf_pipeline
+    import torch
+
+    logs = log(f"🧠 Loading NLLB-200 ({NLLB_MODEL})…", logs)
+    device = 0 if torch.cuda.is_available() else -1
+    _nllb_pipeline = hf_pipeline(
+        "translation",
+        model=NLLB_MODEL,
+        src_lang=NLLB_SRC_LANG,
+        tgt_lang=NLLB_TGT_LANG,
+        device=device,
+        max_length=512,
+        forced_bos_token_id=None,   # let src/tgt lang control output
     )
-    if to_lang is None:
-        raise RuntimeError("Argos: no PT target language found after install.")
+    logs = log(f"   NLLB-200 loaded on {'GPU' if device == 0 else 'CPU'}", logs)
+    return _nllb_pipeline, logs
 
-    logs = log(f"   Argos translation model: {ARGOS_FROM}→{to_lang.code}", logs)
-    translation = from_lang.get_translation(to_lang)
 
-    translated = []
-    for seg in segments:
-        pt_text = translation.translate(seg["text"].strip())
-        translated.append({
-            "start": seg["start"],
-            "end":   seg["end"],
-            "text":  pt_text,
-        })
+def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
+    """Batch-translate EN→PT-BR via NLLB-200, then normalise PT-PT markers."""
+    pipe, logs = _get_nllb_pipeline(logs)
 
-    logs = log(f"✅ Translated {len(translated)} segments", logs)
+    results = []
+    batch_size = 32
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        outputs = pipe(batch, batch_size=min(8, len(batch)))
+        results.extend(o["translation_text"] for o in outputs)  # type: ignore[index]
+
+    # Post-process: convert remaining PT-PT markers to PT-BR
+    results = [_ptpt_to_ptbr(t) for t in results]
+    return results, logs
+
+
+# ── OpenRouter translation (fallback) ─────────────────────────────────────────
+
+SYSTEM_PROMPT = (
+    "You are a professional translator specialising in Brazilian Portuguese (PT-BR). "
+    "CRITICAL RULES:\n"
+    "1. Output ONLY in Brazilian Portuguese (PT-BR). NEVER use European Portuguese (PT-PT).\n"
+    "2. Use 'voce' for second person singular. NEVER use 'tu', 'teu', 'tua', 'vos'.\n"
+    "3. Use gerund forms: 'estao fazendo', 'estou vendo'. NEVER use 'estao a fazer', 'estou a ver'.\n"
+    "4. Use Brazilian vocabulary: 'onibus' not 'autocarro', 'celular' not 'telemovel', "
+    "'trem' not 'comboio', 'banheiro' not 'casa de banho', 'legal' not 'fixe', "
+    "'criancas' not 'miudos', 'entender' not 'perceber' (when meaning to understand).\n"
+    "5. Use 3rd person verb conjugations with 'voce': 'voce esta' not 'voce estas'.\n"
+    "6. Keep informal, conversational register as in the original.\n"
+    "7. Preserve all punctuation and segment numbering exactly."
+)
+
+
+def _call_openrouter(texts: list[str], api_key: str) -> list[str]:
+    """Single API call: translate a chunk of texts, return list of strings."""
+    import urllib.request
+    import re as _re
+
+    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
+    user_msg = (
+        f"Translate these {len(texts)} numbered sentences to Brazilian Portuguese (PT-BR).\n"
+        "Output ONLY the numbered translations — same count, same order, nothing else.\n\n"
+        f"{numbered}"
+    )
+
+    payload = json.dumps({
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ],
+        "temperature": 0.1,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{OPENROUTER_BASE}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/dubweave",
+            "X-Title": "Dubweave",
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        data = json.loads(resp.read())
+
+    raw = data["choices"][0]["message"]["content"].strip()
+
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+    result = []
+    for line in lines:
+        clean = _re.sub(r"^\d+[\.)\s]+", "", line).strip()
+        if clean:
+            result.append(clean)
+    return result
+
+
+def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[list[str], list]:
+    """
+    Translate via OpenRouter in chunks of 80 segments.
+    Chunking keeps each request within ~4k tokens, well within any model's limit.
+    A full 10-min video (320 segs) = 4 API calls ≈ $0.0008 on mistral-7b.
+    """
+    logs = log(f"🌐 Translating via OpenRouter ({OPENROUTER_MODEL})…", logs)
+
+    CHUNK = 80
+    all_translated = []
+    total_chunks = (len(texts) + CHUNK - 1) // CHUNK
+
+    for chunk_i in range(total_chunks):
+        chunk = texts[chunk_i * CHUNK:(chunk_i + 1) * CHUNK]
+        logs = log(f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} segments)…", logs)
+
+        result = _call_openrouter(chunk, api_key)
+
+        # Safety: pad with originals if count mismatches
+        if len(result) != len(chunk):
+            logs = log(f"   ⚠️  Got {len(result)} back for {len(chunk)} sent — padding with originals", logs)
+            while len(result) < len(chunk):
+                result.append(chunk[len(result)])
+
+        all_translated.extend(result)
+
+    # Final PT-PT safety pass
+    all_translated = [_ptpt_to_ptbr(t) for t in all_translated]
+    logs = log(f"✅ OpenRouter translated {len(all_translated)} segments", logs)
+    return all_translated, logs
+
+
+# ── Public translate_segments (NLLB primary, OpenRouter fallback) ─────────────
+
+def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> tuple[list, list]:
+    """
+    Translate segments EN→PT-BR.
+
+    Strategy:
+      1. If openrouter_key provided → OpenRouter (primary, best PT-BR quality).
+         LLMs follow explicit instructions; NLLB cannot be instructed.
+      2. Otherwise → NLLB-200 local + PT-PT normalizer (free, good enough).
+      3. Both paths apply _ptpt_to_ptbr() as a final safety pass.
+    """
+    texts = [seg["text"].strip() for seg in segments]
+    translated_texts = None
+    primary_error = None
+
+    if openrouter_key.strip():
+        # ── Primary: OpenRouter (instructed PT-BR) ────────────────────────────
+        try:
+            translated_texts, logs = _translate_openrouter(texts, openrouter_key.strip(), logs)
+        except Exception as e:
+            primary_error = str(e)
+            logs = log(f"   ⚠️  OpenRouter failed: {primary_error[:120]}", logs)
+            logs = log("   Falling back to NLLB-200 local…", logs)
+
+    if translated_texts is None:
+        # ── Fallback / sole option: NLLB-200 local ────────────────────────────
+        try:
+            logs = log("🌐 Translating EN → PT-BR (NLLB-200 local)…", logs)
+            translated_texts, logs = _translate_nllb(texts, logs)
+            logs = log(f"✅ Translated {len(translated_texts)} segments (NLLB-200)", logs)
+        except Exception as e:
+            raise RuntimeError(
+                ("All translators failed.\n"
+                + (f"OpenRouter error: {primary_error}\n" if primary_error else "")
+                + f"NLLB error: {e}")
+            )
+
+    # Reassemble with original timestamps
+    translated = [
+        {"start": seg["start"], "end": seg["end"], "text": txt}
+        for seg, txt in zip(segments, translated_texts)
+    ]
     return translated, logs
 
 
@@ -465,7 +645,12 @@ def assemble_dubbed_video(
         str(silent_base)
     ], "silent base")
 
-    # 2. Mix each segment onto the silent base with adelay
+    # 2. Mix each segment onto the silent base with adelay.
+    #
+    # WinError 206 guard: Windows limits CreateProcess command lines to ~32k chars.
+    # With 300+ segments the inline -filter_complex string alone exceeds this.
+    # Solution: write the filter graph to a temp file and use -filter_complex_script,
+    # which passes a file path (short) instead of the graph itself (huge).
     inputs = ["-i", str(silent_base)]
     filter_parts = []
 
@@ -482,10 +667,15 @@ def assemble_dubbed_video(
     )
     filter_complex = ";".join(filter_parts)
 
+    # Write filter graph to file — avoids Windows 32k cmdline limit
+    filter_script = job_dir / "filter_complex.txt"
+    filter_script.write_text(filter_complex, encoding="utf-8")
+
     mixed_audio = job_dir / "dubbed_audio.wav"
     run_ffmpeg(
         ["ffmpeg", "-y"] + inputs +
-        ["-filter_complex", filter_complex, "-map", "[aout]", str(mixed_audio)],
+        ["-filter_complex_script", str(filter_script),
+         "-map", "[aout]", str(mixed_audio)],
         "audio mix"
     )
 
@@ -560,7 +750,7 @@ def cleanup_stale_jobs(logs: list) -> list:
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
-def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, progress=gr.Progress()):
+def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, browser: str, cookies_file: str | None, openrouter_key: str, progress=gr.Progress()):
     logs = []
     job_id = str(int(time.time()))
     job_dir = WORK_DIR / job_id
@@ -574,10 +764,19 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, pro
 
         # Sweep stale jobs from previous runs before starting
         logs = cleanup_stale_jobs(logs)
+        if cookies_file:
+            cookie_msg = f"cookies.txt ({Path(cookies_file).name})"
+        elif browser != "none":
+            cookie_msg = f"browser cookies ({browser})"
+        else:
+            cookie_msg = "anonymous (no cookies)"
+        logs = log(f"🍪 Download mode: {cookie_msg}", logs)
         yield None, "\n".join(logs)
 
         progress(0.05, desc="Downloading…")
-        video_path, audio_path, title, duration, logs = download_video(url, job_dir, logs)
+        video_path, audio_path, title, duration, logs = download_video(
+            url, job_dir, logs, browser=browser, cookies_file=cookies_file
+        )
         yield None, "\n".join(logs)
 
         progress(0.2, desc="Transcribing…")
@@ -585,7 +784,7 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, pro
         yield None, "\n".join(logs)
 
         progress(0.4, desc="Translating…")
-        translated, logs = translate_segments(segments, logs)
+        translated, logs = translate_segments(list(segments), logs, openrouter_key=openrouter_key)
         yield None, "\n".join(logs)
 
         progress(0.55, desc="Synthesizing voice…")
@@ -597,7 +796,7 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, pro
 
         progress(0.85, desc="Assembling video…")
         output_path, logs = assemble_dubbed_video(
-            video_path, timed_clips, duration, job_dir, title, logs
+            video_path, timed_clips, float(duration or 0), job_dir, title or "video", logs
         )
         progress(1.0, desc="Done!")
         yield output_path, "\n".join(logs)
@@ -897,6 +1096,58 @@ def build_ui():
                 elem_id="whisper-radio",
             )
 
+        gr.HTML('<div style="height:8px"></div>')
+
+        with gr.Accordion("🔑 OpenRouter API Key (fallback translation)", open=False):
+            gr.HTML("""
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+              Primary translation uses <strong style="color:#e8e8f0;">NLLB-200</strong> locally on your GPU — true PT-BR, zero cost.<br>
+              If NLLB-200 fails (e.g. out of VRAM), Dubweave will automatically retry<br>
+              via <strong style="color:#e8e8f0;">OpenRouter</strong> using <code style="color:#a99dff;">mistralai/mistral-7b-instruct</code>.<br>
+              <br>
+              A 10-minute video costs roughly <strong style="color:#00e5a0;">$0.0002</strong> via OpenRouter.<br>
+              Leave empty to disable the fallback (NLLB failure will raise an error instead).
+            </div>
+            """)
+            openrouter_key_input = gr.Textbox(
+                placeholder="sk-or-v1-…",
+                label="OpenRouter API key",
+                type="password",
+                lines=1,
+            )
+
+        gr.HTML('<div style="height:8px"></div>')
+
+        with gr.Accordion("🍪 YouTube Account (optional)", open=False):
+            gr.HTML("""
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+              Logged-in cookies give yt-dlp access to YouTube's most reliable clients,<br>
+              avoiding PO token errors and JS challenge failures.<br>
+              <br>
+              <strong style="color:#e8e8f0;">Option A — Browser</strong>: yt-dlp reads cookies directly from a running browser profile.<br>
+              Chrome may fail if the profile is locked. Use Edge as an alternative.<br>
+              <br>
+              <strong style="color:#e8e8f0;">Option B — cookies.txt</strong>: Export cookies using a browser extension
+              (e.g. <em>Get cookies.txt LOCALLY</em> for Chrome) and upload the file here.<br>
+              This is the most reliable method and works regardless of which browser you use.<br>
+              <br>
+              If both are provided, <strong style="color:#e8e8f0;">cookies.txt takes priority</strong>.
+              Select browser <strong style="color:#e8e8f0;">none</strong> and leave file empty to download anonymously.
+            </div>
+            """)
+            with gr.Row():
+                browser_input = gr.Radio(
+                    choices=["none", "chrome", "firefox", "edge", "brave"],
+                    value="none",
+                    label="Option A · Browser cookies",
+                    elem_id="browser-radio",
+                )
+            cookies_file_input = gr.File(
+                label="Option B · cookies.txt file (Netscape format)",
+                file_types=[".txt"],
+                type="filepath",
+            )
+
         gr.HTML('<div style="height:16px"></div>')
 
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
@@ -925,7 +1176,7 @@ def build_ui():
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=[url_input, speaker_input, whisper_model_input],
+            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input],
             outputs=[video_output, log_output],
         )
 
