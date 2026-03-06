@@ -20,6 +20,7 @@ torchvision = { version = "*", channel = "pytorch" }
 torchaudio = { version = "*", channel = "pytorch" }
 pytorch-cuda = { version = "12.4.*", channel = "pytorch" }
 deno = "*"                             # JS runtime for yt-dlp YouTube n-challenge solving
+black = ">=26.1.0,<27"                   # Python code formatter
 
 [pypi-dependencies]
 yt-dlp = "*"
@@ -39,4 +40,5 @@ download-xtts  = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; 
 download-kokoro = "python -W ignore -c \"from kokoro import KPipeline; KPipeline(lang_code='p', repo_id='hexgrad/Kokoro-82M'); print('Kokoro PT-BR ready.')\""
 fetch-ejs      = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
 setup          = { depends-on = ["download-nllb", "download-xtts", "download-kokoro", "fetch-ejs"] }
+format         = "black app.py"
 start          = "python app.py"
