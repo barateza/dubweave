@@ -577,6 +577,17 @@ def _merge_segments(segments: list) -> list:
     return merged
 
 
+def _group_for_synthesis(translated: list) -> list:
+    """
+    Group translated segments back into utterances for sentence-level synthesis.
+    
+    After expand_merged, segments are broken at acoustic boundaries mid-sentence.
+    This re-groups them into complete utterances (terminal punctuation + ≥4 words)
+    so each utterance is synthesized as a single natural-sounding TTS call.
+    """
+    return _merge_segments(translated)
+
+
 def _expand_merged(merged_translated: list, original_segments: list) -> list:
     """
     Re-expand translated utterances back to original segment granularity.
@@ -1217,6 +1228,145 @@ def assemble_dubbed_video(
     return abs_path, logs
 
 
+# ── SRT subtitle generation ───────────────────────────────────────────────────
+
+# Reading-speed constants (Netflix/BBC standard for accessible subtitles)
+SRT_CHARS_PER_SEC = 17.0   # comfortable reading pace
+SRT_MIN_DURATION  = 1.2    # minimum cue display time (seconds)
+SRT_MAX_CHARS     = 80     # maximum chars per cue before refusing to merge
+SRT_MERGE_GAP     = 0.5    # merge adjacent segments separated by ≤ this gap (seconds)
+SRT_LINE_WIDTH    = 42     # wrap to 2 lines when text exceeds this character count
+
+
+def _srt_timestamp(seconds: float) -> str:
+    """Convert float seconds to SRT timestamp: HH:MM:SS,mmm."""
+    ms  = int(round(seconds * 1000))
+    hh  = ms // 3_600_000; ms %= 3_600_000
+    mm  = ms //    60_000; ms %=    60_000
+    ss  = ms //     1_000; ms %=     1_000
+    return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
+
+
+def _wrap_subtitle_line(text: str) -> str:
+    """
+    Split text into at most 2 balanced lines broken at the word boundary
+    nearest the midpoint. Returns the original string when it fits on one line.
+    """
+    if len(text) <= SRT_LINE_WIDTH:
+        return text
+    words = text.split()
+    mid        = len(text) // 2
+    pos        = 0
+    best_split = max(1, len(words) // 2)
+    best_dist  = float("inf")
+    for i in range(1, len(words)):
+        pos  += len(words[i - 1]) + 1
+        dist  = abs(pos - mid)
+        if dist < best_dist:
+            best_dist  = dist
+            best_split = i
+    return " ".join(words[:best_split]) + "\n" + " ".join(words[best_split:])
+
+
+def generate_srt(segments: list, output_path: Path) -> int:
+    """
+    Convert translated segments to a natural-reading SRT subtitle file.
+
+    Pass 1 — Merge: join consecutive short fragments (gap ≤ SRT_MERGE_GAP,
+    combined length ≤ SRT_MAX_CHARS) into complete, readable cues.
+
+    Pass 2 — Timing: extend any cue whose display window is shorter than the
+    time needed to read it at SRT_CHARS_PER_SEC (floor: SRT_MIN_DURATION).
+    Extensions are capped just before the next cue starts (50 ms gap).
+
+    Pass 3 — Wrap + write: split cues longer than SRT_LINE_WIDTH at the word
+    boundary nearest the midpoint, then write standard SRT output.
+
+    Returns the number of subtitle cues written.
+    """
+    # ── Pass 1: merge ─────────────────────────────────────────────────────────
+    cues: list[dict] = []
+    for seg in segments:
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+        start, end = seg["start"], seg["end"]
+        if cues:
+            prev     = cues[-1]
+            gap      = start - prev["end"]
+            combined = prev["text"] + " " + text
+            if gap <= SRT_MERGE_GAP and len(combined) <= SRT_MAX_CHARS:
+                prev["text"] = combined
+                prev["end"]  = end
+                continue
+        cues.append({"start": start, "end": end, "text": text})
+
+    # ── Pass 2: enforce minimum reading time ──────────────────────────────────
+    for i, cue in enumerate(cues):
+        min_dur     = max(SRT_MIN_DURATION, len(cue["text"]) / SRT_CHARS_PER_SEC)
+        natural_end = cue["start"] + min_dur
+        if cue["end"] < natural_end:
+            ceiling = cues[i + 1]["start"] - 0.05 if i + 1 < len(cues) else natural_end
+            new_end = min(natural_end, ceiling)
+            if new_end > cue["end"]:
+                cue["end"] = new_end
+
+    # ── Pass 3: write SRT ─────────────────────────────────────────────────────
+    lines: list[str] = []
+    for idx, cue in enumerate(cues, start=1):
+        lines.append(str(idx))
+        lines.append(f"{_srt_timestamp(cue['start'])} --> {_srt_timestamp(cue['end'])}")
+        lines.append(_wrap_subtitle_line(cue["text"]))
+        lines.append("")
+
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    return len(cues)
+
+
+def generate_srt_for_project(project_name: str) -> tuple[str | None, str]:
+    """
+    Generate an SRT subtitle file from a project's translated.json.
+
+    Saves the SRT to projects/{name}/outputs/{title}_PT-BR.srt and also
+    copies it to the global outputs/ folder for easy access.
+
+    Returns (srt_file_path, status_message).
+    """
+    proj = project_name.strip()
+    if not proj:
+        return None, "❌ No project name provided."
+
+    d               = project_dir(proj)
+    translated_file = d / "translated.json"
+    if not translated_file.exists():
+        return None, (
+            f"❌ No translated.json found for project '{proj}'. "
+            "Run the translate stage first."
+        )
+
+    title     = proj
+    meta_file = d / "meta.json"
+    if meta_file.exists():
+        try:
+            title = json.loads(meta_file.read_text(encoding="utf-8")).get("title", proj)
+        except Exception:
+            pass
+
+    segments   = json.loads(translated_file.read_text(encoding="utf-8"))
+    safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
+
+    out_dir  = d / "outputs"
+    out_dir.mkdir(exist_ok=True)
+    srt_path = out_dir / f"{safe_title}_PT-BR.srt"
+
+    n = generate_srt(segments, srt_path)
+
+    global_srt = OUTPUT_DIR / f"{safe_title}_PT-BR.srt"
+    shutil.copy2(str(srt_path), str(global_srt))
+
+    return str(srt_path), f"✅ {n} subtitle cues written → {srt_path.name}"
+
+
 # ── Cleanup helpers ───────────────────────────────────────────────────────────
 
 def cleanup_stale_jobs(logs: list) -> list:
@@ -1433,13 +1583,15 @@ def run_pipeline(
         # ── Synthesize ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["synthesize"]:
             progress(0.55, desc="Synthesizing voice…")
+            utterances = _group_for_synthesis(translated)
+            logs = log(f"   Grouped {len(translated)} segments → {len(utterances)} utterances for sentence-level synthesis", logs)
             if tts_engine == "Kokoro (fast, PT-BR native)":
                 timed_clips, logs = synthesize_segments_kokoro(
-                    translated, job_dir, logs, voice=kokoro_voice,
+                    utterances, job_dir, logs, voice=kokoro_voice,
                 )
             else:
                 timed_clips, logs = synthesize_segments(
-                    translated, audio_path, job_dir, logs,
+                    utterances, audio_path, job_dir, logs,
                     speaker_wav=speaker_wav_path,
                 )
             save_project_stage(proj, "synthesize", timed_clips)
@@ -1456,6 +1608,14 @@ def run_pipeline(
             video_path, timed_clips, float(duration or 0), job_dir, title or "video", logs
         )
         save_project_stage(proj, "assemble", output_path)
+
+        # Auto-generate SRT subtitles from the translated segments
+        try:
+            _srt_path, _srt_msg = generate_srt_for_project(proj)
+            logs = log(f"📄 {_srt_msg}", logs)
+        except Exception as _srt_err:
+            logs = log(f"⚠️  SRT generation failed: {_srt_err}", logs)
+
         progress(1.0, desc="Done!")
         yield output_path, "\n".join(logs)
 
@@ -1877,6 +2037,31 @@ def build_ui():
         gr.HTML('<div style="height:4px"></div>')
         gr.HTML('<div class="panel-label">04 · Output</div>')
         video_output = gr.Video(label="Dubbed video (PT-BR)")
+
+        gr.HTML('<div style="height:12px"></div>')
+        gr.HTML('<div class="panel-label">05 · Subtitles</div>')
+        gr.HTML("""
+        <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 12px;line-height:1.7;">
+          Generates an SRT from <code>translated.json</code> — no re-synthesis needed.<br>
+          Short fragments are merged, minimum reading time is enforced (17 chars/sec),
+          and long lines are wrapped to 2 lines for readability.
+        </p>
+        """)
+        with gr.Row():
+            srt_btn = gr.Button("📝  Generate / Download SRT", variant="secondary")
+        with gr.Row():
+            srt_file_output = gr.File(label="SRT subtitle file")
+            srt_status      = gr.Textbox(label="Status", lines=1, interactive=False)
+
+        def _run_generate_srt(project_name):
+            path, msg = generate_srt_for_project(project_name)
+            return path, msg
+
+        srt_btn.click(
+            fn=_run_generate_srt,
+            inputs=[project_name_input],
+            outputs=[srt_file_output, srt_status],
+        )
 
         gr.HTML("""
         <div style="text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #2a2a3e;">
