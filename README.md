@@ -8,9 +8,11 @@
 
 ```
 YouTube URL
-    ↓  yt-dlp          → downloads video (MP4) + audio (WAV) separately
-    ↓  Whisper (GPU)   → transcribes English speech with timestamps
-    ↓  Argos Translate → translates EN→PT-BR entirely offline
+    ↓  yt-dlp (Deno)   → downloads best video + audio track separately
+    ↓  Whisper (GPU)   → transcribes English speech (large-v3-turbo)
+    ↓  Segment Merging → groups fragments into semantic utterances
+    ↓  NLLB-200 (GPU)  → translates EN→PT-BR 100% locally
+    ↓  PT-BR Norm      → normalizes European Portuguese markers (tu/te/tuas)
     ↓  XTTS v2 (GPU)   → synthesizes PT-BR speech cloning original speaker's voice
     ↓  FFmpeg          → time-aligns each audio segment, mixes, muxes with video
     ↓  Output MP4      → dubbed video, ready to watch
@@ -22,11 +24,11 @@ YouTube URL
 
 | Requirement | Notes |
 |-------------|-------|
-| Windows 11  | Tested on Win 11 |
-| Pixi        | [pixi.sh](https://pixi.sh) — package manager |
-| NVIDIA RTX 4070 Super | CUDA 12.1 drivers |
-| ~10 GB free disk | XTTS v2 model (~3.5 GB) + Whisper medium (~1.5 GB) |
-| Internet (first run) | To download models and language pack |
+| Windows 11  | Tested on Windows 11 |
+| Pixi        | [pixi.sh](https://pixi.sh) — unified environment manager |
+| NVIDIA GPU  | 8+ GB VRAM recommended (tested on RTX 4070 Super) |
+| ~12 GB free disk | Models: XTTS v2 (~3.5 GB) + NLLB-200 (~2.4 GB) + Whisper large-v3-turbo (~1.5 GB) |
+| Internet (setup) | Downloads models, Deno, and YouTube JS solver script |
 
 ---
 
@@ -34,7 +36,11 @@ YouTube URL
 
 1. Open PowerShell and install Pixi: `iwr -useb https://pixi.sh/install.ps1 | iex` (then close and reopen your terminal)
 2. Double-click **`setup.bat`**
-3. Wait ~10 min for model downloads (3.5 GB XTTS v2 + Whisper medium)
+3. Wait for downloads (~10 min). This fetches:
+   - **NLLB-200** (Distilled-600M) translation model
+   - **XTTS v2** voice synthesis model
+   - **Whisper large-v3-turbo** for transcription
+   - **Deno** for resolving YouTube's *n-challenge* (prevents download errors)
 
 ## Launch
 
@@ -42,69 +48,35 @@ Double-click **`start.bat`** → open http://localhost:7860
 
 ---
 
-## Usage
+## Features
 
-1. Paste a YouTube URL
-2. Optionally upload a voice reference WAV (10–30 seconds of the voice you want to clone)
-   - Leave empty → auto-clones from the video's own speaker (first 30s)
-3. Click **DUB THIS VIDEO**
-4. Watch the log stream; output MP4 appears when done
+### Coherent Translation
+Unlike segment-by-segment translation (Argos), Dubweave merges Whisper fragments into full semantic utterances before translating. This ensures pronouns and context remain consistent.
 
----
+### PT-PT → PT-BR Normalizer
+Most open-source translation models (NLLB) often default to European Portuguese. Dubweave includes a post-processing layer that automatically converts "tu/te/teus" to "você/seu" and fixes gerund forms (e.g., "a fazer" → "fazendo").
 
-## Voice Quality
+### Fallback Translation
+If you have an **OpenRouter API Key**, you can enable higher-quality LLM translation (e.g., Gemini 2.0 Flash) in the UI. It uses a 3-utterance sliding context window to maintain narrative flow.
 
-**XTTS v2** is Coqui's state-of-the-art multilingual TTS model:
-- Runs fully on your RTX 4070 Super (CUDA)
-- Clones a voice from a short reference clip (10–30s)
-- Supports Brazilian Portuguese natively (`pt` language code)
-- Produces near-human quality speech
-
-With voice cloning from the original speaker, the dubbed voice will sound like the original person speaking Portuguese — not a generic TTS voice.
-
----
-
-## Translation
-
-**Argos Translate** runs 100% locally — no API key, no cost, no data leaving your machine. Quality is good for most spoken content. For premium quality, you can swap to DeepL API (free tier: 500k chars/month):
-
-```python
-# In app.py, replace translate_segments() body:
-import deepl
-translator = deepl.Translator("YOUR_DEEPL_API_KEY")
-result = translator.translate_text(text, target_lang="PT-BR")
-```
-
----
-
-## Timing / Sync
-
-Speech synthesis produces audio at a natural pace, which may differ from the original timing. The pipeline uses FFmpeg `atempo` filter to stretch or compress each segment to match the original duration. This keeps lips/actions roughly in sync. Not perfect — professional dubbing tools use more sophisticated phoneme alignment — but it's very watchable.
+### Self-Healing Downloads
+Uses a format cascade via `yt-dlp`. If a high-quality DASH stream is throttled or fails JS challenge solvability, it automatically drops to lower but guaranteed muxed formats (including format 18).
 
 ---
 
 ## GPU Memory
 
-| Model | VRAM |
+| Model | VRAM (approx.) |
 |-------|------|
-| XTTS v2 | ~3–4 GB |
-| Whisper medium | ~2 GB |
-| **Total** | ~5–6 GB |
+| Whisper large-v3-turbo | ~2 GB |
+| NLLB-200 | ~1.5 GB |
+| XTTS v2 | ~4 GB |
+| **Total Overhead** | **~7-8 GB** |
 
-RTX 4070 Super has 12 GB VRAM — plenty of headroom.
-
----
-
-## Troubleshooting
-
-**CUDA out of memory** → Run Whisper and XTTS sequentially (default). Close other GPU apps.
-
-**Argos language pack error** → Run setup.bat again; it re-downloads the pack.
-
-**yt-dlp download fails** → Update yt-dlp: open terminal, run `pixi update yt-dlp`
+Runs comfortably on 12GB cards (RTX 3060/4070+).
 
 ---
 
 ## License
 
-Pipeline code: MIT. Models: XTTS v2 (Coqui Public Model License), Whisper (MIT), Argos Translate (MIT).
+Pipeline code: MIT. Models: XTTS v2 (Coqui PLM), NLLB (MIT/Apache 2.0), Whisper (MIT).
