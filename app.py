@@ -44,7 +44,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 WHISPER_MODEL  = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
 XTTS_MODEL     = "tts_models/multilingual/multi-dataset/xtts_v2"
-TARGET_LANG    = "pt-br"            # Brazilian Portuguese (distinct from pt-pt in XTTS)
+TARGET_LANG    = "pt"               # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
 ARGOS_FROM     = "en"
 ARGOS_TO       = "pt"
 
@@ -96,11 +96,41 @@ def download_video(url: str, job_dir: Path, logs: list):
     video_path = job_dir / "video.mp4"
     audio_path = job_dir / "audio_orig.wav"
 
+    # ── Detect aria2c and deno availability ──────────────────────────────────
+    import shutil as _shutil
+    _aria2c = _shutil.which("aria2c")
+    _deno   = _shutil.which("deno")
+
+    if _aria2c:
+        logs = log(f"   aria2c found — using for accelerated download", logs)
+    if _deno:
+        logs = log(f"   deno found — YouTube JS challenge solving enabled", logs)
+    else:
+        logs = log("   ⚠️  deno not found — some YouTube formats may be missing (run setup.bat)", logs)
+
     BASE_OPTS = {
         "outtmpl": str(job_dir / "%(id)s_%(format_id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": False,
         "ignoreerrors": False,
+        # Use cached EJS solver script for YouTube n-challenge (downloaded by setup.bat)
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
+        **({"remote_components": ["ejs:github"]} if _deno else {}),
+        # ── aria2c: multi-connection download via your local RPC server ───────
+        # Falls back to yt-dlp's built-in downloader if aria2c is not in PATH.
+        **({"external_downloader": "aria2c",
+            "external_downloader_args": {
+                "aria2c": [
+                    "--rpc-save-upload-metadata=false",
+                    "--file-allocation=none",        # faster start, skip prealloc
+                    "--optimize-concurrent-downloads=true",
+                    "--max-connection-per-server=4", # YouTube allows ~4 per URL
+                    "--min-split-size=5M",
+                    "--split=4",
+                    "--max-tries=5",
+                    "--retry-wait=3",
+                ]
+            }} if _aria2c else {}),
     }
 
     # ── Step 1: probe title/duration without downloading ─────────────────────
@@ -795,7 +825,7 @@ video { border-radius: 12px !important; }
 """
 
 def build_ui():
-    with gr.Blocks() as demo:
+    with gr.Blocks(title="Dubweave — PT-BR") as demo:
 
         gr.HTML("""
         <div id="header">
@@ -911,5 +941,4 @@ if __name__ == "__main__":
         share=False,
         show_error=True,
         css=CSS,
-        title="Dubweave — PT-BR",
     )

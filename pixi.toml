@@ -19,6 +19,7 @@ pytorch = { version = ">=2.1", channel = "pytorch" }
 torchvision = { version = "*", channel = "pytorch" }
 torchaudio = { version = "*", channel = "pytorch" }
 pytorch-cuda = { version = "12.4.*", channel = "pytorch" }
+deno = "*"                             # JS runtime for yt-dlp YouTube n-challenge solving
 
 [pypi-dependencies]
 yt-dlp = "*"
@@ -32,5 +33,6 @@ triton-windows = "*"           # Windows port of Triton — GPU kernels for Whis
 [tasks]
 download-argos = "python -c \"import argostranslate.package; argostranslate.package.update_package_index(); pkgs = argostranslate.package.get_available_packages(); pkg = next((p for p in pkgs if p.from_code=='en' and p.to_code=='pt'), None); pkg and argostranslate.package.install_from_path(pkg.download()); print('Language pack ready.')\""
 download-xtts  = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2'); print('XTTS v2 ready.')\""
-setup          = { depends-on = ["download-argos", "download-xtts"] }
+fetch-ejs      = "powershell -NoProfile -Command \"yt-dlp --remote-components ejs:github -v --skip-download 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' 2>&1 | Select-String -Pattern 'ejs|jsc|deno|component'\""
+setup          = { depends-on = ["download-argos", "download-xtts", "fetch-ejs"] }
 start          = "python app.py"
