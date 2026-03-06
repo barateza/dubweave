@@ -744,27 +744,27 @@ def synthesize_segments(
             file_path=str(out_raw),
         )
 
-        # Stretch/compress to match original duration
+        # Timing adjustment: compress or stretch to fit original segment duration.
+        #
+        # Hard cap at 1.6× speed — beyond this speech becomes unintelligible.
+        # If synthesized audio is longer than 1.6× the slot allows, we let it
+        # run over into the following silence rather than destroying clarity.
+        # Stretching (ratio < 1.0) is always safe; we allow down to 0.8×.
         orig_dur = seg["end"] - seg["start"]
         if orig_dur > 0.1:
-            # Get synthesized duration
             probe = subprocess.run([
                 "ffprobe", "-v", "error", "-show_entries",
                 "format=duration", "-of", "json", str(out_raw)
             ], capture_output=True, text=True)
             synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
 
-            # atempo supports 0.5–2.0; chain filters for extremes
-            ratio = synth_dur / orig_dur
-            ratio = max(0.4, min(ratio, 3.5))  # safety clamp
+            ratio = synth_dur / orig_dur  # >1 = too long, need to speed up
 
-            if 0.5 <= ratio <= 2.0:
-                atempo = f"atempo={ratio:.4f}"
-            elif ratio < 0.5:
-                atempo = f"atempo={max(ratio**0.5, 0.5):.4f},atempo={ratio/max(ratio**0.5,0.5):.4f}"
-            else:  # > 2.0
-                atempo = f"atempo=2.0,atempo={ratio/2.0:.4f}"
+            # Cap: never compress beyond 1.6× (intelligibility limit)
+            # Never stretch beyond 0.8× (sounds unnaturally slow)
+            ratio = max(0.8, min(ratio, 1.6))
 
+            atempo = f"atempo={ratio:.4f}"
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(out_raw),
                 "-filter:a", atempo,
@@ -855,10 +855,22 @@ def assemble_dubbed_video(
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
     output_path = OUTPUT_DIR / f"{safe_title}_PT-BR.mp4"
 
+    # Normalize dubbed audio to -3 dB before mux.
+    # amix divided amplitude by the number of inputs (~52), leaving the
+    # signal near -34 dB. loudnorm brings it back to broadcast level.
+    # We also upmix to stereo here so players don't report "1 channel".
+    normalized_audio = job_dir / "dubbed_audio_norm.wav"
+    run_ffmpeg([
+        "ffmpeg", "-y",
+        "-i", str(mixed_audio),
+        "-filter:a", "loudnorm=I=-16:TP=-3:LRA=7,pan=stereo|c0=c0|c1=c0",
+        str(normalized_audio)
+    ], "loudnorm")
+
     run_ffmpeg([
         "ffmpeg", "-y",
         "-i", str(video_path),
-        "-i", str(mixed_audio),
+        "-i", str(normalized_audio),
         "-c:v", "copy",
         "-c:a", "aac", "-b:a", "192k",
         "-map", "0:v:0", "-map", "1:a:0",
