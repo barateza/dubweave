@@ -950,75 +950,96 @@ def assemble_dubbed_video(
             )
         return result
 
-    # 1. Build a silent base track at full duration
-    silent_base = job_dir / "silent_base.wav"
-    run_ffmpeg([
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
-        "-t", str(duration + 2),
-        str(silent_base)
-    ], "silent base")
-
-    # 2. Mix each segment onto the silent base with adelay.
+    # Audio assembly: place each segment at its timestamp using sox.
+    # 
+    # All previous amix-based approaches divided amplitude by input count,
+    # producing audio 20-34 dB below full scale regardless of weights or
+    # normalization passes applied afterward.
     #
-    # WinError 206 guard: Windows limits CreateProcess command lines to ~32k chars.
-    # With 300+ segments the inline -filter_complex string alone exceeds this.
-    # Solution: write the filter graph to a temp file and use -filter_complex_script,
-    # which passes a file path (short) instead of the graph itself (huge).
-    inputs = ["-i", str(silent_base)]
-    filter_parts = []
+    # The correct primitive for this task is NOT mixing (amix) — it is
+    # timeline placement. sox `splice` or a Python numpy buffer writes each
+    # segment's samples directly at the correct offset. No averaging occurs.
+    # Amplitude is preserved exactly as XTTS produced it.
+    #
+    # We use a numpy buffer: pre-allocate silence, write each clip's samples
+    # at its timestamp offset. One read per clip, one write total. O(N) time,
+    # O(duration) memory (~80MB for a 13-min mono 44100Hz float32 buffer).
 
-    for i, clip in enumerate(timed_clips):
-        inputs += ["-i", clip["path"]]
-        delay_ms = int(clip["start"] * 1000)
-        filter_parts.append(
-            f"[{i+1}]adelay={delay_ms}|{delay_ms}[d{i}]"
-        )
+    import numpy as np
+    import wave
 
-    mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(timed_clips)))
-    # weights="1 1 1...": give every input equal weight of 1 instead of
-    # the default behaviour where amix divides by N, which destroys volume.
-    n_inputs = len(timed_clips) + 1
-    weights_str = " ".join(["1"] * n_inputs)
-    filter_parts.append(
-        f"{mix_inputs}amix=inputs={n_inputs}:dropout_transition=0:weights=\"{weights_str}\"[aout]"
-    )
-    filter_complex = ";".join(filter_parts)
+    SR = 44100
+    total_samples = int((duration + 2) * SR)
+    buffer = np.zeros(total_samples, dtype=np.float32)
 
-    # Write filter graph to file — avoids Windows 32k cmdline limit
-    filter_script = job_dir / "filter_complex.txt"
-    filter_script.write_text(filter_complex, encoding="utf-8")
+    logs = log("🔊 Placing segments into audio timeline…", logs)
+    for clip in timed_clips:
+        offset = int(clip["start"] * SR)
+        # Read clip WAV into numpy
+        try:
+            with wave.open(clip["path"], "rb") as wf:
+                n_frames = wf.getnframes()
+                raw = wf.readframes(n_frames)
+                clip_sr = wf.getframerate()
+                n_ch = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+
+            # Convert raw bytes → float32 [-1, 1]
+            if sampwidth == 2:
+                samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            elif sampwidth == 4:
+                samples = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+            else:
+                samples = np.frombuffer(raw, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
+
+            # Mix down to mono if stereo
+            if n_ch == 2:
+                samples = samples.reshape(-1, 2).mean(axis=1)
+
+            # Resample if needed (shouldn't happen — all clips are 44100Hz)
+            if clip_sr != SR:
+                factor = SR / clip_sr
+                new_len = int(len(samples) * factor)
+                samples = np.interp(
+                    np.linspace(0, len(samples) - 1, new_len),
+                    np.arange(len(samples)),
+                    samples
+                ).astype(np.float32)
+
+            end = min(offset + len(samples), total_samples)
+            buffer[offset:end] += samples[:end - offset]
+
+        except Exception as e:
+            logs = log(f"   ⚠️  Could not read clip {clip['path']}: {e}", logs)
+
+    # Peak-normalize to -1 dBFS so the output is loud without clipping
+    peak = np.max(np.abs(buffer))
+    if peak > 0.001:
+        buffer = buffer * (0.891 / peak)  # 0.891 ≈ -1 dBFS
+    else:
+        logs = log("   ⚠️  Audio buffer is nearly silent — synthesis may have failed", logs)
+
+    # Convert to stereo int16 WAV
+    stereo = np.stack([buffer, buffer], axis=1)
+    stereo_int16 = (stereo * 32767).clip(-32768, 32767).astype(np.int16)
 
     mixed_audio = job_dir / "dubbed_audio.wav"
-    run_ffmpeg(
-        ["ffmpeg", "-y"] + inputs +
-        ["-filter_complex_script", str(filter_script),
-         "-map", "[aout]", str(mixed_audio)],
-        "audio mix"
-    )
+    with wave.open(str(mixed_audio), "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(SR)
+        wf.writeframes(stereo_int16.tobytes())
+
+    logs = log("✅ Audio timeline assembled", logs)
 
     # 3. Mux video + dubbed audio
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
     output_path = OUTPUT_DIR / f"{safe_title}_PT-BR.mp4"
 
-    # Volume fix: amix averages all inputs, dividing amplitude by input count.
-    # With 50+ segments the signal ends up ~34 dB below full scale.
-    # dynaudnorm automatically brings the signal up to a consistent level
-    # without the two-pass requirement of loudnorm.
-    # alimiter prevents clipping after the boost.
-    # pan=stereo duplicates mono → both channels so players see 2ch audio.
-    normalized_audio = job_dir / "dubbed_audio_norm.wav"
-    run_ffmpeg([
-        "ffmpeg", "-y",
-        "-i", str(mixed_audio),
-        "-filter:a", "dynaudnorm=p=0.95:m=100:s=12,alimiter=limit=0.99,pan=stereo|c0=c0|c1=c0",
-        str(normalized_audio)
-    ], "dynaudnorm")
-
     run_ffmpeg([
         "ffmpeg", "-y",
         "-i", str(video_path),
-        "-i", str(normalized_audio),
+        "-i", str(mixed_audio),
         "-c:v", "copy",
         "-c:a", "aac", "-b:a", "192k",
         "-map", "0:v:0", "-map", "1:a:0",
