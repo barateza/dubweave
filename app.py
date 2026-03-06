@@ -397,14 +397,28 @@ SYSTEM_PROMPT = (
 )
 
 
-def _call_openrouter(texts: list[str], api_key: str) -> list[str]:
-    """Single API call: translate a chunk of texts, return list of strings."""
+def _call_openrouter(texts: list[str], api_key: str, context: list[str] | None = None) -> list[str]:
+    """Single API call: translate a chunk of texts, return list of strings.
+
+    context: previously translated utterances prepended as read-only context
+    so the model can resolve pronouns and maintain register across chunk boundaries.
+    """
     import urllib.request
     import re as _re
 
+    ctx_block = ""
+    if context:
+        ctx_lines = "\n".join(f"  {t}" for t in context)
+        ctx_block = (
+            f"[CONTEXT — already translated, do NOT include in output]\n"
+            f"{ctx_lines}\n"
+            f"[END CONTEXT]\n\n"
+        )
+
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
     user_msg = (
-        f"Translate these {len(texts)} numbered sentences to Brazilian Portuguese (PT-BR).\n"
+        f"{ctx_block}"
+        f"Translate these {len(texts)} numbered utterances to Brazilian Portuguese (PT-BR).\n"
         "Output ONLY the numbered translations — same count, same order, nothing else.\n\n"
         f"{numbered}"
     )
@@ -446,67 +460,207 @@ def _call_openrouter(texts: list[str], api_key: str) -> list[str]:
 
 def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[list[str], list]:
     """
-    Translate via OpenRouter in chunks of 80 segments.
-    Chunking keeps each request within ~4k tokens, well within any model's limit.
-    A full 10-min video (320 segs) = 4 API calls ≈ $0.0008 on mistral-7b.
+    Translate via OpenRouter in chunks of 60 utterances with a 3-utterance
+    context window prepended to each chunk.
+
+    Context window rationale: without preceding context, the model translates
+    each chunk as if it starts a new document. Pronouns, topics, and register
+    established earlier are invisible. Prepending the last 3 utterances of the
+    previous chunk as [CONTEXT] (not to be translated) gives the model enough
+    coherence to resolve anaphora and maintain register across boundaries.
     """
     logs = log(f"🌐 Translating via OpenRouter ({OPENROUTER_MODEL})…", logs)
 
-    CHUNK = 80
+    CHUNK   = 60   # smaller than 80 to leave room for context tokens
+    CONTEXT = 3    # preceding utterances to include as read-only context
     all_translated = []
     total_chunks = (len(texts) + CHUNK - 1) // CHUNK
 
     for chunk_i in range(total_chunks):
         chunk = texts[chunk_i * CHUNK:(chunk_i + 1) * CHUNK]
-        logs = log(f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} segments)…", logs)
+        ctx   = all_translated[-CONTEXT:] if all_translated else []
 
-        result = _call_openrouter(chunk, api_key)
+        logs = log(f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} utterances, {len(ctx)} context)…", logs)
+
+        result = _call_openrouter(chunk, api_key, context=ctx)
 
         # Safety: pad with originals if count mismatches
         if len(result) != len(chunk):
             logs = log(f"   ⚠️  Got {len(result)} back for {len(chunk)} sent — padding with originals", logs)
             while len(result) < len(chunk):
                 result.append(chunk[len(result)])
+            result = result[:len(chunk)]
 
         all_translated.extend(result)
 
     # Final PT-PT safety pass
     all_translated = [_ptpt_to_ptbr(t) for t in all_translated]
-    logs = log(f"✅ OpenRouter translated {len(all_translated)} segments", logs)
+    logs = log(f"✅ OpenRouter translated {len(all_translated)} utterances", logs)
     return all_translated, logs
 
 
 # ── Public translate_segments (NLLB primary, OpenRouter fallback) ─────────────
 
+# ── Segment merging ──────────────────────────────────────────────────────────
+
+def _merge_segments(segments: list) -> tuple[list, list]:
+    """
+    Merge short/incomplete Whisper segments into utterance-sized units.
+
+    Whisper segments are acoustic boundaries, not semantic ones. Short segments
+    (< 4 words) and segments without terminal punctuation are mid-utterance
+    fragments. Translating them in isolation loses context and produces broken
+    output. We merge them into utterances, translate the utterances, then
+    re-expand back to original segment granularity by duration proportion.
+
+    Returns:
+        merged   — list of {start, end, text, children: [original indices]}
+        index_map — merged_idx → [original_seg_indices]
+    """
+    import re
+    TERMINAL = re.compile(r'[.!?]$')
+    MIN_WORDS = 4
+
+    merged = []
+    current_text = ""
+    current_start = None
+    current_children = []
+
+    for i, seg in enumerate(segments):
+        text = seg["text"].strip()
+        if not text:
+            continue
+
+        if current_start is None:
+            current_start = seg["start"]
+
+        current_text = (current_text + " " + text).strip()
+        current_children.append(i)
+
+        word_count = len(current_text.split())
+        has_terminal = bool(TERMINAL.search(current_text))
+
+        # Flush if: terminal punctuation AND enough words, or too long (safety)
+        if (has_terminal and word_count >= MIN_WORDS) or word_count >= 40:
+            merged.append({
+                "start":    current_start,
+                "end":      seg["end"],
+                "text":     current_text,
+                "children": current_children[:],
+            })
+            current_text = ""
+            current_start = None
+            current_children = []
+
+    # Flush any trailing fragment
+    if current_text:
+        last_end = segments[current_children[-1]]["end"]
+        merged.append({
+            "start":    current_start,
+            "end":      last_end,
+            "text":     current_text,
+            "children": current_children[:],
+        })
+
+    return merged
+
+
+def _expand_merged(merged_translated: list, original_segments: list) -> list:
+    """
+    Re-expand translated utterances back to original segment granularity.
+
+    Each merged utterance may cover multiple original segments. We distribute
+    the translated text across children proportionally by original duration.
+    This is an approximation — the invariant (acoustic/semantic/synthesis
+    boundary mismatch) means perfect alignment is impossible — but it is
+    better than translating fragments blind.
+    """
+    result = []
+    for utt in merged_translated:
+        children = utt["children"]
+        if len(children) == 1:
+            result.append({
+                "start": original_segments[children[0]]["start"],
+                "end":   original_segments[children[0]]["end"],
+                "text":  utt["text"],
+            })
+            continue
+
+        # Distribute translated text by word proportion across children
+        translated_words = utt["text"].split()
+        total_dur = sum(
+            original_segments[c]["end"] - original_segments[c]["start"]
+            for c in children
+        )
+        if total_dur <= 0:
+            # Degenerate: give all text to first child
+            for j, c in enumerate(children):
+                result.append({
+                    "start": original_segments[c]["start"],
+                    "end":   original_segments[c]["end"],
+                    "text":  utt["text"] if j == 0 else "…",
+                })
+            continue
+
+        word_cursor = 0
+        for j, c in enumerate(children):
+            seg_dur = original_segments[c]["end"] - original_segments[c]["start"]
+            proportion = seg_dur / total_dur
+            if j == len(children) - 1:
+                # Last child gets remainder to avoid off-by-one word loss
+                word_slice = translated_words[word_cursor:]
+            else:
+                n_words = max(1, round(len(translated_words) * proportion))
+                word_slice = translated_words[word_cursor:word_cursor + n_words]
+                word_cursor += n_words
+
+            result.append({
+                "start": original_segments[c]["start"],
+                "end":   original_segments[c]["end"],
+                "text":  " ".join(word_slice) if word_slice else "…",
+            })
+
+    return result
+
+
 def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> tuple[list, list]:
     """
     Translate segments EN→PT-BR.
 
-    Strategy:
-      1. If openrouter_key provided → OpenRouter (primary, best PT-BR quality).
-         LLMs follow explicit instructions; NLLB cannot be instructed.
-      2. Otherwise → NLLB-200 local + PT-PT normalizer (free, good enough).
-      3. Both paths apply _ptpt_to_ptbr() as a final safety pass.
+    Pipeline:
+      1. Merge short/incomplete Whisper segments into utterances.
+         Rationale: Whisper segments are acoustic units; translating fragments
+         blind loses context and produces broken output at boundaries.
+      2. Translate merged utterances (OpenRouter primary, NLLB fallback).
+         Each chunk is sent with 2 preceding utterances as read-only context.
+      3. Re-expand translated utterances back to original segment granularity
+         by duration proportion.
+      4. Apply PT-PT → PT-BR normalizer as final safety pass.
     """
-    texts = [seg["text"].strip() for seg in segments]
+    # ── Step 1: merge ─────────────────────────────────────────────────────────
+    merged = _merge_segments(segments)
+    logs = log(f"   Merged {len(segments)} Whisper segments → {len(merged)} utterances for translation", logs)
+    merged_texts = [u["text"] for u in merged]
+
+    # ── Step 2: translate ─────────────────────────────────────────────────────
     translated_texts = None
     primary_error = None
 
     if openrouter_key.strip():
-        # ── Primary: OpenRouter (instructed PT-BR) ────────────────────────────
         try:
-            translated_texts, logs = _translate_openrouter(texts, openrouter_key.strip(), logs)
+            translated_texts, logs = _translate_openrouter(
+                merged_texts, openrouter_key.strip(), logs
+            )
         except Exception as e:
             primary_error = str(e)
             logs = log(f"   ⚠️  OpenRouter failed: {primary_error[:120]}", logs)
             logs = log("   Falling back to NLLB-200 local…", logs)
 
     if translated_texts is None:
-        # ── Fallback / sole option: NLLB-200 local ────────────────────────────
         try:
             logs = log("🌐 Translating EN → PT-BR (NLLB-200 local)…", logs)
-            translated_texts, logs = _translate_nllb(texts, logs)
-            logs = log(f"✅ Translated {len(translated_texts)} segments (NLLB-200)", logs)
+            translated_texts, logs = _translate_nllb(merged_texts, logs)
+            logs = log(f"✅ Translated {len(translated_texts)} utterances (NLLB-200)", logs)
         except Exception as e:
             raise RuntimeError(
                 ("All translators failed.\n"
@@ -514,11 +668,20 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
                 + f"NLLB error: {e}")
             )
 
-    # Reassemble with original timestamps
-    translated = [
-        {"start": seg["start"], "end": seg["end"], "text": txt}
-        for seg, txt in zip(segments, translated_texts)
-    ]
+    # Empty-translation safety: fall back to original English per utterance
+    empty_count = 0
+    for i, (utt, txt) in enumerate(zip(merged, translated_texts)):
+        clean = txt.strip() if txt else ""
+        if not clean:
+            clean = utt["text"]
+            empty_count += 1
+        merged[i] = {**utt, "text": clean}
+    if empty_count:
+        logs = log(f"   ⚠️  {empty_count} empty translation(s) — kept original English", logs)
+
+    # ── Step 3: re-expand to original segment granularity ────────────────────
+    translated = _expand_merged(merged, segments)
+    logs = log(f"✅ Translated + re-expanded to {len(translated)} segments", logs)
     return translated, logs
 
 
@@ -557,6 +720,14 @@ def synthesize_segments(
     seg_dir = job_dir / "segments"
     seg_dir.mkdir(exist_ok=True)
 
+    # Sanitize: empty text crashes XTTS with a misleading "reference_wav" error.
+    # This happens when the translation parser drops a segment's content.
+    # Log each empty segment so the cause is visible, then skip it.
+    empty = [i for i, s in enumerate(segments) if not s.get("text", "").strip()]
+    if empty:
+        logs = log(f"   ⚠️  {len(empty)} empty segment(s) after translation (indices: {empty[:10]}{'…' if len(empty)>10 else ''}) — skipping", logs)
+    segments = [s for s in segments if s.get("text", "").strip()]
+
     logs = log(f"🎤 Synthesizing {len(segments)} segments (voice clone)…", logs)
 
     timed_clips = []
@@ -564,8 +735,10 @@ def synthesize_segments(
         out_raw  = seg_dir / f"seg_{i:04d}_raw.wav"
         out_clip = seg_dir / f"seg_{i:04d}.wav"
 
+        text = seg["text"].strip()
+
         tts.tts_to_file(
-            text=seg["text"],
+            text=text,
             speaker_wav=ref_wav,
             language=TARGET_LANG,
             file_path=str(out_raw),
@@ -662,7 +835,7 @@ def assemble_dubbed_video(
 
     mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(timed_clips)))
     filter_parts.append(
-        f"{mix_inputs}amix=inputs={len(timed_clips)+1}:normalize=0[aout]"
+        f"{mix_inputs}amix=inputs={len(timed_clips)+1}:dropout_transition=0[aout]"
     )
     filter_complex = ";".join(filter_parts)
 
