@@ -8,14 +8,12 @@ import os
 import sys
 import json
 import time
-import typing
-import torch
 import shutil
 import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Generator, Any, Callable, Mapping, Optional
+from typing import Generator, Any, cast
 
 import warnings
 import gradio as gr
@@ -49,6 +47,11 @@ PROJECTS_DIR.mkdir(exist_ok=True)
 WHISPER_MODEL  = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
 XTTS_MODEL     = "tts_models/multilingual/multi-dataset/xtts_v2"
 TARGET_LANG    = "pt"               # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
+
+# Kokoro config
+KOKORO_LANG    = "p"                # PT-BR lang_code in Kokoro
+KOKORO_VOICE   = "pf_dora"          # pf_dora (F), pm_alex (M), pm_santa (M)
+KOKORO_SPEED   = 1.0                # 1.0 = natural rate; increase to fit tight slots
 # Translation config
 NLLB_MODEL      = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, true PT-BR
 NLLB_SRC_LANG   = "eng_Latn"
@@ -151,8 +154,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     # ── Step 1: probe title/duration without downloading ─────────────────────
     title, duration = "video", 0
     try:
-        probe_opts: Any = {**BASE_OPTS, "skip_download": True}
-        with yt.YoutubeDL(probe_opts) as ydl:
+        with yt.YoutubeDL(cast(Any, {**BASE_OPTS, "skip_download": True})) as ydl:
             info = ydl.extract_info(url, download=False)
             title    = info.get("title", "video")
             duration = info.get("duration", 0)
@@ -175,9 +177,9 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
 
     for fmt in VIDEO_FORMATS:
         try:
-            opts: Any = {**BASE_OPTS, "format": fmt,
-                         "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
-            with yt.YoutubeDL(opts) as ydl:
+            opts = {**BASE_OPTS, "format": fmt,
+                    "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
+            with yt.YoutubeDL(cast(Any, opts)) as ydl:
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
             if candidates:
@@ -216,7 +218,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         raw_audio_file = None
         for fmt in AUDIO_FORMATS:
             try:
-                opts: Any = {
+                opts = {
                     **BASE_OPTS,
                     "format": fmt,
                     "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
@@ -226,7 +228,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
                         "preferredquality": "0",
                     }],
                 }
-                with yt.YoutubeDL(opts) as ydl:
+                with yt.YoutubeDL(cast(Any, opts)) as ydl:
                     ydl.extract_info(url, download=True)
                 candidates = list(job_dir.glob("audio_raw.*"))
                 if candidates:
@@ -251,7 +253,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     return video_path, audio_path, title, duration, logs
 
 
-def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MODEL):
+def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MODEL) -> tuple[list, list]:
     """Transcribe audio with Whisper, return segments with timestamps."""
     import whisper
     logs = log(f"🎙️ Transcribing with Whisper ({model_name})…", logs)
@@ -264,7 +266,7 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
         verbose=False,
     )
 
-    segments = result["segments"]
+    segments = cast(list, result["segments"])
     logs = log(f"✅ Transcribed {len(segments)} segments", logs)
     return segments, logs
 
@@ -274,7 +276,7 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
 # These are the most common European Portuguese markers that NLLB and other
 # models default to. Replacing them with Brazilian equivalents covers ~90% of
 # the perceptible difference in everyday spoken content.
-_PTPT_TO_PTBR: list[tuple[str, str | Callable]] = [
+_PTPT_TO_PTBR = [
     # Pronouns / address
     (r"tu",            "você"),
     (r"te",            "te"),          # keep — both use "te" but context helps
@@ -330,14 +332,13 @@ _PTPT_TO_PTBR: list[tuple[str, str | Callable]] = [
 def _ptpt_to_ptbr(text: str) -> str:
     """Apply PT-PT → PT-BR lexical substitutions."""
     import re
-    from re import Match
     for pattern, replacement in _PTPT_TO_PTBR:
         if callable(replacement):
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            text = re.sub(pattern, cast(Any, replacement), text, flags=re.IGNORECASE)
         else:
             # Preserve capitalisation of the first letter
-            def _replace(m: Match, repl: str = replacement) -> str:
-                if m.group(0)[0].isupper() and len(repl) > 0:
+            def _replace(m: re.Match[str], repl: str = replacement) -> str:
+                if m.group(0)[0].isupper():
                     return repl[0].upper() + repl[1:]
                 return repl
             text = re.sub(pattern, _replace, text, flags=re.IGNORECASE)
@@ -379,9 +380,8 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
     batch_size = 32
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        outputs = pipe(batch, batch_size=min(8, len(batch)))
-        if isinstance(outputs, list):
-            results.extend(o["translation_text"] for o in outputs if o and "translation_text" in o)
+        outputs = cast(list[dict[str, str]], pipe(batch, batch_size=min(8, len(batch))))
+        results.extend(o["translation_text"] for o in outputs)
 
     # Post-process: convert remaining PT-PT markers to PT-BR
     results = [_ptpt_to_ptbr(t) for t in results]
@@ -522,7 +522,8 @@ def _merge_segments(segments: list) -> list:
     re-expand back to original segment granularity by duration proportion.
 
     Returns:
-        merged — list of {start, end, text, children: [original indices]}
+        merged   — list of {start, end, text, children: [original indices]}
+        index_map — merged_idx → [original_seg_indices]
     """
     import re
     TERMINAL = re.compile(r'[.!?]$')
@@ -834,6 +835,148 @@ def apply_timing_budget(
     return segments, logs
 
 
+import re
+
+def _sanitize_for_tts(text: str) -> str:
+    """
+    Clean text before passing to XTTS.
+    Removes spelled-out punctuation (ponto, virgula) and characters
+    XTTS reads aloud instead of treating as prosody cues.
+    """
+    spelled = [
+        (r"\bponto e v\u00edrgula\b",   ","),
+        (r"\bponto e virgula\b",         ","),
+        (r"\bdois pontos\b",             ","),
+        (r"\bponto final\b",             ""),
+        (r"\bponto\b",                   ""),
+        (r"\bv\u00edrgula\b",            ","),
+        (r"\bvirgula\b",                 ","),
+        (r"\bexclama\u00e7\u00e3o\b",    "!"),
+        (r"\bexclamacao\b",              "!"),
+        (r"\binterroga\u00e7\u00e3o\b",  "?"),
+        (r"\binterrogacao\b",            "?"),
+        (r"\babre par\u00eanteses\b",    ""),
+        (r"\bfecha par\u00eanteses\b",   ""),
+        (r"\baspas\b",                   ""),
+        (r"\btravess\u00e3o\b",          ","),
+        (r"\bperiod\b",                  ""),
+        (r"\bcomma\b",                   ","),
+        (r"\bsemicolon\b",               ","),
+        (r"\bcolon\b",                   ","),
+        (r"\bexclamation mark\b",        "!"),
+        (r"\bquestion mark\b",           "?"),
+    ]
+    for pattern, replacement in spelled:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    text = re.sub(r"[;:]",     ",",  text)
+    text = re.sub(r"\.{2,}",   ",",  text)
+    text = re.sub(r"\.",        "",   text)
+    text = re.sub(r"[()\[\]{}]", "", text)
+    text = re.sub(r'[\u201c\u201d\u2018\u2019"\'`]', "", text)
+    text = re.sub(r"[-\u2013\u2014]{2,}", ",", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text if text else "\u2026"
+
+
+def synthesize_segments_kokoro(
+    segments: list,
+    job_dir: Path,
+    logs: list,
+    voice: str = KOKORO_VOICE,
+    speed: float = KOKORO_SPEED,
+):
+    """
+    Synthesize PT-BR speech using Kokoro-82M.
+
+    Advantages over XTTS v2:
+    - 82M params vs ~1B — loads in <2s, uses ~500MB VRAM
+    - 24kHz output, natural prosody, no voice-cloning overhead
+    - Native PT-BR support (lang_code='p', voices: pf_dora/pm_alex/pm_santa)
+    - Returns numpy arrays directly — no subprocess needed
+
+    Requires: pip install kokoro soundfile
+              espeak-ng installed system-wide (Windows: espeak-ng MSI)
+    """
+    import numpy as np
+    import soundfile as sf
+    from kokoro import KPipeline  # type: ignore
+
+    KOKORO_SR = 24000  # Kokoro always outputs at 24kHz
+
+    logs = log(f"🔊 Loading Kokoro-82M (lang=pt-br, voice={voice})…", logs)
+    pipeline = KPipeline(lang_code=KOKORO_LANG)
+    logs = log("   Kokoro ready", logs)
+
+    # Sanitize and filter empty segments
+    empty = [i for i, s in enumerate(segments) if not s.get("text", "").strip()]
+    if empty:
+        logs = log(f"   ⚠️  {len(empty)} empty segment(s) — skipping", logs)
+    segments = [s for s in segments if s.get("text", "").strip()]
+
+    seg_dir = job_dir / "segments"
+    seg_dir.mkdir(exist_ok=True)
+
+    logs = log(f"🎤 Synthesizing {len(segments)} segments (Kokoro PT-BR, voice={voice})…", logs)
+
+    timed_clips = []
+    for i, seg in enumerate(segments):
+        out_raw  = seg_dir / f"seg_{i:04d}_raw.wav"
+        out_clip = seg_dir / f"seg_{i:04d}.wav"
+
+        text = _sanitize_for_tts(seg["text"].strip())
+
+        # KPipeline returns a generator of (graphemes, phonemes, audio_array)
+        # For short segments it yields one chunk; collect and concatenate.
+        chunks = []
+        for _, _, audio in pipeline(text, voice=voice, speed=speed):
+            chunks.append(audio)
+
+        if not chunks:
+            logs = log(f"   ⚠️  Kokoro returned no audio for segment {i} — skipping", logs)
+            continue
+
+        audio_np = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+        sf.write(str(out_raw), audio_np, KOKORO_SR)
+
+        # Timing adjustment — same logic as XTTS path
+        orig_dur = seg["end"] - seg["start"]
+        if orig_dur > 0.1:
+            probe = subprocess.run([
+                "ffprobe", "-v", "error", "-show_entries",
+                "format=duration", "-of", "json", str(out_raw)
+            ], capture_output=True, text=True)
+            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
+
+            ratio = synth_dur / orig_dur
+            ratio = max(0.8, min(ratio, 1.6))
+
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(out_raw),
+                "-filter:a", f"atempo={ratio:.4f}",
+                "-ar", "44100", str(out_clip)
+            ], capture_output=True)
+        else:
+            # Resample to 44100 for consistency with the numpy assembler
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(out_raw),
+                "-ar", "44100", str(out_clip)
+            ], capture_output=True)
+
+        timed_clips.append({
+            "path":  str(out_clip),
+            "start": seg["start"],
+            "end":   seg["end"],
+        })
+
+        if i % 10 == 0:
+            logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
+
+    logs = log("✅ All segments synthesized (Kokoro)", logs)
+    return timed_clips, logs
+
+
 def synthesize_segments(
     segments: list,
     audio_orig: Path,
@@ -884,7 +1027,7 @@ def synthesize_segments(
         out_raw  = seg_dir / f"seg_{i:04d}_raw.wav"
         out_clip = seg_dir / f"seg_{i:04d}.wav"
 
-        text = seg["text"].strip()
+        text = _sanitize_for_tts(seg["text"].strip())
 
         tts.tts_to_file(
             text=text,
@@ -1180,18 +1323,21 @@ def save_project_stage(name: str, stage: str, data):
             shutil.copy2(data, str(dst))
 
 
-def load_project_stage(name: str, stage: str) -> typing.Any:
+def load_project_stage(name: str, stage: str) -> Any:
     """Load a previously saved stage output from project directory."""
     d = project_dir(name)
-    if stage == "download":
-        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-        return d / "video.mp4", d / "audio_orig.wav", meta["title"], meta["duration"]
-    elif stage == "transcribe":
-        return json.loads((d / "segments.json").read_text(encoding="utf-8"))
-    elif stage == "translate":
-        return json.loads((d / "translated.json").read_text(encoding="utf-8"))
-    elif stage == "synthesize":
-        return json.loads((d / "timed_clips.json").read_text(encoding="utf-8"))
+    try:
+        if stage == "download":
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+            return d / "video.mp4", d / "audio_orig.wav", meta["title"], meta["duration"]
+        elif stage == "transcribe":
+            return json.loads((d / "segments.json").read_text(encoding="utf-8"))
+        elif stage == "translate":
+            return json.loads((d / "translated.json").read_text(encoding="utf-8"))
+        elif stage == "synthesize":
+            return json.loads((d / "timed_clips.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
     return None
 
 
@@ -1206,6 +1352,8 @@ def run_pipeline(
     openrouter_key: str,
     project_name: str,
     resume_from: str,
+    tts_engine: str = "XTTS v2 (voice clone)",
+    kokoro_voice: str = KOKORO_VOICE,
     progress=gr.Progress(),
 ):
     logs = []
@@ -1249,7 +1397,10 @@ def run_pipeline(
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping download (loaded from project)", logs)
-            video_path, audio_path, title, duration = load_project_stage(proj, "download")
+            res = load_project_stage(proj, "download")
+            if not res:
+                raise RuntimeError(f"Project '{proj}' download stage not found — cannot resume.")
+            video_path, audio_path, title, duration = res
             logs = log(f"   📹 {title} ({duration}s)", logs)
             yield None, "\n".join(logs)
 
@@ -1261,7 +1412,9 @@ def run_pipeline(
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping transcription (loaded from project)", logs)
-            segments = load_project_stage(proj, "transcribe")
+            segments = cast(list, load_project_stage(proj, "transcribe"))
+            if segments is None:
+                raise RuntimeError(f"Project '{proj}' transcription stage not found — cannot resume.")
             logs = log(f"   📝 {len(segments)} segments loaded", logs)
             yield None, "\n".join(logs)
 
@@ -1275,22 +1428,31 @@ def run_pipeline(
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping translation (loaded from project)", logs)
-            translated = load_project_stage(proj, "translate")
+            translated = cast(list, load_project_stage(proj, "translate"))
+            if translated is None:
+                raise RuntimeError(f"Project '{proj}' translation stage not found — cannot resume.")
             logs = log(f"   🌐 {len(translated)} translated segments loaded", logs)
             yield None, "\n".join(logs)
 
         # ── Synthesize ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["synthesize"]:
             progress(0.55, desc="Synthesizing voice…")
-            timed_clips, logs = synthesize_segments(
-                translated, audio_path, job_dir, logs,
-                speaker_wav=speaker_wav_path
-            )
+            if tts_engine == "Kokoro (fast, PT-BR native)":
+                timed_clips, logs = synthesize_segments_kokoro(
+                    translated, job_dir, logs, voice=kokoro_voice,
+                )
+            else:
+                timed_clips, logs = synthesize_segments(
+                    translated, audio_path, job_dir, logs,
+                    speaker_wav=speaker_wav_path,
+                )
             save_project_stage(proj, "synthesize", timed_clips)
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping synthesis (loaded from project)", logs)
-            timed_clips = load_project_stage(proj, "synthesize")
+            timed_clips = cast(list, load_project_stage(proj, "synthesize"))
+            if timed_clips is None:
+                raise RuntimeError(f"Project '{proj}' synthesis stage not found — cannot resume.")
             logs = log(f"   🔊 {len(timed_clips)} audio clips loaded", logs)
             yield None, "\n".join(logs)
 
@@ -1679,6 +1841,31 @@ def build_ui():
                 type="filepath",
             )
 
+        gr.HTML('<div style="height:8px"></div>')
+
+        with gr.Accordion("🔊 TTS Engine", open=True):
+            gr.HTML("""
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+              <strong style="color:#00e5a0;">Kokoro</strong> — recommended. 82M params, loads in &lt;2s, native PT-BR voices,
+              no voice cloning. Extremely fast on RTX 4070 Super.<br>
+              Voices: <code>pf_dora</code> (female) · <code>pm_alex</code> (male) · <code>pm_santa</code> (male)<br>
+              Requires: <code>pip install kokoro soundfile</code> + espeak-ng installed.<br>
+              <br>
+              <strong style="color:#e8e8f0;">XTTS v2</strong> — clones the original speaker's voice. Slower, uses ~4GB VRAM.
+              Best when matching the original speaker matters more than speed.
+            </div>
+            """)
+            tts_engine_input = gr.Radio(
+                choices=["Kokoro (fast, PT-BR native)", "XTTS v2 (voice clone)"],
+                value="Kokoro (fast, PT-BR native)",
+                label="TTS engine",
+            )
+            kokoro_voice_input = gr.Dropdown(
+                choices=["pf_dora", "pm_alex", "pm_santa"],
+                value="pf_dora",
+                label="Kokoro voice (ignored when using XTTS v2)",
+            )
+
         gr.HTML('<div style="height:16px"></div>')
 
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
@@ -1707,7 +1894,7 @@ def build_ui():
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input, project_name_input, resume_from_input],
+            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input, project_name_input, resume_from_input, tts_engine_input, kokoro_voice_input],
             outputs=[video_output, log_output],
         )
 
