@@ -71,6 +71,75 @@ NLLB_TGT_LANG = os.getenv("NLLB_TGT_LANG", "por_Latn")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
 
+# Google Cloud TTS config (from .env)
+GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY", "").strip()
+GOOGLE_TTS_LANGUAGE_CODE = os.getenv("GOOGLE_TTS_LANGUAGE_CODE", "pt-BR")
+GOOGLE_TTS_VOICE_TYPE = os.getenv("GOOGLE_TTS_VOICE_TYPE", "Neural2")
+GOOGLE_TTS_VOICE_NAME = os.getenv("GOOGLE_TTS_VOICE_NAME", "pt-BR-Neural2-A")
+
+# Known PT-BR voices per Google Cloud TTS model family.
+# Used to populate the UI dropdowns when a valid API key is present.
+GOOGLE_TTS_VOICE_CATALOG: dict[str, list[str]] = {
+    "Chirp3 HD": [
+        "pt-BR-Chirp3-HD-Achernar",
+        "pt-BR-Chirp3-HD-Achird",
+        "pt-BR-Chirp3-HD-Algenib",
+        "pt-BR-Chirp3-HD-Algieba",
+        "pt-BR-Chirp3-HD-Alnilam",
+        "pt-BR-Chirp3-HD-Aoede",
+        "pt-BR-Chirp3-HD-Autonoe",
+        "pt-BR-Chirp3-HD-Callirrhoe",
+        "pt-BR-Chirp3-HD-Charon",
+        "pt-BR-Chirp3-HD-Despina",
+        "pt-BR-Chirp3-HD-Enceladus",
+        "pt-BR-Chirp3-HD-Erinome",
+        "pt-BR-Chirp3-HD-Fenrir",
+        "pt-BR-Chirp3-HD-Gacrux",
+        "pt-BR-Chirp3-HD-Iapetus",
+        "pt-BR-Chirp3-HD-Kore",
+        "pt-BR-Chirp3-HD-Laomedeia",
+        "pt-BR-Chirp3-HD-Leda",
+        "pt-BR-Chirp3-HD-Orus",
+        "pt-BR-Chirp3-HD-Puck",
+        "pt-BR-Chirp3-HD-Pulcherrima",
+        "pt-BR-Chirp3-HD-Rasalgethi",
+        "pt-BR-Chirp3-HD-Sadachbia",
+        "pt-BR-Chirp3-HD-Sadaltager",
+        "pt-BR-Chirp3-HD-Schedar",
+        "pt-BR-Chirp3-HD-Sulafat",
+        "pt-BR-Chirp3-HD-Umbriel",
+        "pt-BR-Chirp3-HD-Vindemiatrix",
+        "pt-BR-Chirp3-HD-Zephyr",
+        "pt-BR-Chirp3-HD-Zubenelgenubi",
+    ],
+    "WaveNet": [
+        "pt-BR-Wavenet-A",
+        "pt-BR-Wavenet-B",
+        "pt-BR-Wavenet-C",
+        "pt-BR-Wavenet-D",
+        "pt-BR-Wavenet-E",
+    ],
+    "Standard": [
+        "pt-BR-Standard-A",
+        "pt-BR-Standard-B",
+        "pt-BR-Standard-C",
+        "pt-BR-Standard-D",
+        "pt-BR-Standard-E",
+    ],
+    "Studio": [
+        "pt-BR-Studio-B",
+        "pt-BR-Studio-C",
+    ],
+    "Neural2": [
+        "pt-BR-Neural2-A",
+        "pt-BR-Neural2-B",
+        "pt-BR-Neural2-C",
+    ],
+    # No dedicated PT-BR Polyglot voices exist; the entry is kept so the
+    # voice type is selectable and the name from .env is used as-is.
+    "Polyglot (Preview)": [],
+}
+
 JOB_MAX_AGE_H = 2  # hours before a stale job folder is eligible for cleanup (not configurable)
 
 
@@ -1150,6 +1219,158 @@ def synthesize_segments_kokoro(
     return timed_clips, logs
 
 
+def synthesize_segments_google_tts(
+    segments: list,
+    job_dir: Path,
+    logs: list,
+    api_key: str,
+    voice_type: str = "Neural2",
+    voice_name: str = "pt-BR-Neural2-A",
+    language_code: str = "pt-BR",
+):
+    """
+    Synthesize speech using the Google Cloud Text-to-Speech REST API.
+
+    Supported voice types (passed as voice_type):
+      Chirp3 HD  — Latest generation, highest quality (pt-BR-Chirp3-HD-*)
+      Neural2    — High-quality neural voices (pt-BR-Neural2-*)
+      WaveNet    — High-quality voices (pt-BR-Wavenet-*)
+      Studio     — Extremely natural, higher latency (pt-BR-Studio-*)
+      Standard   — Fast, low-cost (pt-BR-Standard-*)
+      Polyglot   — Multilingual single-speaker (limited PT-BR availability)
+
+    Requests LINEAR16 (WAV) at 24 kHz; timing-adjusts via atempo + resamples
+    to 44100 Hz with ffmpeg, identical to the Kokoro and XTTS paths.
+
+    The API key is passed via the x-goog-api-key request header so it never
+    appears in URLs or server access logs.
+    """
+    import base64
+    import urllib.request
+    import urllib.error
+
+    logs = log(f"🔊 Loading Google Cloud TTS ({voice_type}: {voice_name})…", logs)
+
+    endpoint = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+    seg_dir = job_dir / "segments"
+    seg_dir.mkdir(exist_ok=True)
+
+    empty = [i for i, s in enumerate(segments) if not s.get("text", "").strip()]
+    if empty:
+        logs = log(f"   ⚠️  {len(empty)} empty segment(s) — skipping", logs)
+    segments = [s for s in segments if s.get("text", "").strip()]
+
+    logs = log(
+        f"🎤 Synthesizing {len(segments)} segments (Google Cloud TTS)…", logs
+    )
+
+    timed_clips = []
+    for i, seg in enumerate(segments):
+        out_raw = seg_dir / f"seg_{i:04d}_raw.wav"
+        out_clip = seg_dir / f"seg_{i:04d}.wav"
+
+        text = _sanitize_for_tts(seg["text"].strip())
+
+        payload = json.dumps(
+            {
+                "input": {"text": text},
+                "voice": {
+                    "languageCode": language_code,
+                    "name": voice_name,
+                },
+                "audioConfig": {
+                    "audioEncoding": "LINEAR16",
+                    "sampleRateHertz": 24000,
+                },
+            }
+        ).encode()
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                # Header-based key auth keeps the API key out of URLs and logs.
+                "x-goog-api-key": api_key,
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode(errors="replace")[:300]
+            raise RuntimeError(
+                f"Google Cloud TTS API error (segment {i}): HTTP {e.code}\n{err_body}"
+            )
+
+        audio_bytes = base64.b64decode(data["audioContent"])
+        out_raw.write_bytes(audio_bytes)
+
+        # Timing adjustment — same atempo logic as Kokoro / XTTS paths.
+        orig_dur = seg["end"] - seg["start"]
+        if orig_dur > 0.1:
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
+                    str(out_raw),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
+            ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(out_raw),
+                    "-filter:a",
+                    f"atempo={ratio:.4f}",
+                    "-ar",
+                    "44100",
+                    str(out_clip),
+                ],
+                capture_output=True,
+            )
+        else:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(out_raw),
+                    "-ar",
+                    "44100",
+                    str(out_clip),
+                ],
+                capture_output=True,
+            )
+
+        timed_clips.append(
+            {
+                "path": str(out_clip),
+                "start": seg["start"],
+                "end": seg["end"],
+            }
+        )
+
+        if i % 10 == 0:
+            logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
+
+    logs = log("✅ All segments synthesized (Google Cloud TTS)", logs)
+    return timed_clips, logs
+
+
 def synthesize_segments(
     segments: list,
     audio_orig: Path,
@@ -1727,6 +1948,8 @@ def run_pipeline(
     resume_from: str,
     tts_engine: str = "XTTS v2 (voice clone)",
     kokoro_voice: str = KOKORO_VOICE,
+    google_tts_voice_type: str = GOOGLE_TTS_VOICE_TYPE,
+    google_tts_voice_name: str = GOOGLE_TTS_VOICE_NAME,
     progress=gr.Progress(),
 ):
     logs = []
@@ -1824,6 +2047,20 @@ def run_pipeline(
                     job_dir,
                     logs,
                     voice=kokoro_voice,
+                )
+            elif tts_engine == "Google Cloud TTS":
+                if not GOOGLE_TTS_API_KEY:
+                    raise RuntimeError(
+                        "Google Cloud TTS selected but GOOGLE_TTS_API_KEY is not set in .env"
+                    )
+                timed_clips, logs = synthesize_segments_google_tts(
+                    utterances,
+                    job_dir,
+                    logs,
+                    api_key=GOOGLE_TTS_API_KEY,
+                    voice_type=google_tts_voice_type,
+                    voice_name=google_tts_voice_name,
+                    language_code=GOOGLE_TTS_LANGUAGE_CODE,
                 )
             else:
                 timed_clips, logs = synthesize_segments(
@@ -2235,7 +2472,16 @@ def build_ui():
         gr.HTML('<div style="height:8px"></div>')
 
         with gr.Accordion("🔊 TTS Engine", open=True):
-            gr.HTML("""
+            _google_note = ""
+            if GOOGLE_TTS_API_KEY:
+                _google_note = (
+                    "<br><strong style='color:#7c6dff;'>Google Cloud TTS</strong> "
+                    "— cloud-based, multiple model families. "
+                    "Voice type and name are set in <code>.env</code> and "
+                    "can be overridden here. Requires a valid "
+                    "<code>GOOGLE_TTS_API_KEY</code> in <code>.env</code>."
+                )
+            gr.HTML(f"""
             <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
               <strong style="color:#00e5a0;">Kokoro</strong> — recommended. 82M params, loads in &lt;2s, native PT-BR voices,
               no voice cloning. Extremely fast on RTX 4070 Super.<br>
@@ -2243,18 +2489,81 @@ def build_ui():
               Requires: <code>pip install kokoro soundfile</code> + espeak-ng installed.<br>
               <br>
               <strong style="color:#e8e8f0;">XTTS v2</strong> — clones the original speaker's voice. Slower, uses ~4GB VRAM.
-              Best when matching the original speaker matters more than speed.
+              Best when matching the original speaker matters more than speed.{_google_note}
             </div>
             """)
+
+            _tts_choices = ["Kokoro (fast, PT-BR native)", "XTTS v2 (voice clone)"]
+            if GOOGLE_TTS_API_KEY:
+                _tts_choices.append("Google Cloud TTS")
+
             tts_engine_input = gr.Radio(
-                choices=["Kokoro (fast, PT-BR native)", "XTTS v2 (voice clone)"],
+                choices=_tts_choices,
                 value="Kokoro (fast, PT-BR native)",
                 label="TTS engine",
             )
             kokoro_voice_input = gr.Dropdown(
                 choices=["pf_dora", "pm_alex", "pm_santa"],
                 value="pf_dora",
-                label="Kokoro voice (ignored when using XTTS v2)",
+                label="Kokoro voice",
+                visible=True,
+            )
+
+            # ── Google Cloud TTS controls (shown only when Google TTS is selected) ──
+            _gtypes = list(GOOGLE_TTS_VOICE_CATALOG.keys())
+            _gtype_default = (
+                GOOGLE_TTS_VOICE_TYPE
+                if GOOGLE_TTS_VOICE_TYPE in _gtypes
+                else "Neural2"
+            )
+            _gvoices = list(GOOGLE_TTS_VOICE_CATALOG.get(_gtype_default, []))
+            if GOOGLE_TTS_VOICE_NAME and GOOGLE_TTS_VOICE_NAME not in _gvoices:
+                _gvoices.insert(0, GOOGLE_TTS_VOICE_NAME)
+            if not _gvoices:
+                _gvoices = [GOOGLE_TTS_VOICE_NAME or "pt-BR-Neural2-A"]
+            _gvoice_default = (
+                GOOGLE_TTS_VOICE_NAME
+                if GOOGLE_TTS_VOICE_NAME in _gvoices
+                else _gvoices[0]
+            )
+
+            with gr.Row(visible=False) as google_tts_row:
+                google_voice_type_input = gr.Dropdown(
+                    choices=_gtypes,
+                    value=_gtype_default,
+                    label="Google TTS · Voice type",
+                    scale=1,
+                )
+                google_voice_input = gr.Dropdown(
+                    choices=_gvoices,
+                    value=_gvoice_default,
+                    label="Google TTS · Voice name",
+                    scale=2,
+                )
+
+            def _on_tts_engine_change(engine):
+                is_kokoro = engine == "Kokoro (fast, PT-BR native)"
+                is_google = engine == "Google Cloud TTS"
+                return gr.update(visible=is_kokoro), gr.update(visible=is_google)
+
+            tts_engine_input.change(
+                fn=_on_tts_engine_change,
+                inputs=[tts_engine_input],
+                outputs=[kokoro_voice_input, google_tts_row],
+            )
+
+            def _on_google_voice_type_change(voice_type):
+                voices = list(GOOGLE_TTS_VOICE_CATALOG.get(voice_type, []))
+                if not voices:
+                    # Polyglot (Preview) or unknown — fall back to env-configured name
+                    env_name = GOOGLE_TTS_VOICE_NAME or "pt-BR-Neural2-A"
+                    voices = [env_name]
+                return gr.update(choices=voices, value=voices[0])
+
+            google_voice_type_input.change(
+                fn=_on_google_voice_type_change,
+                inputs=[google_voice_type_input],
+                outputs=[google_voice_input],
             )
 
         gr.HTML('<div style="height:16px"></div>')
@@ -2320,6 +2629,8 @@ def build_ui():
                 resume_from_input,
                 tts_engine_input,
                 kokoro_voice_input,
+                google_voice_type_input,
+                google_voice_input,
             ],
             outputs=[video_output, log_output],
         )
