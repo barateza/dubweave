@@ -63,6 +63,59 @@ Double-click **`start.bat`** → open <http://localhost:7860>
 
 ---
 
+## Configuration
+
+### Environment Variables (`.env`)
+
+Dubweave reads configuration from a `.env` file in the project root. A default `.env` is created on first run with all settings pre-configured.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | *(empty)* | Optional LLM translation via OpenRouter (Gemini 2.0 Flash). Leave empty to use local NLLB-200 only. ~$0.002 per 10-min video. |
+| `WHISPER_MODEL` | `large-v3-turbo` | Speech transcription model. Options: `large-v3-turbo` (4GB, faster), `large-v3` (10GB, more accurate) |
+| `NLLB_MODEL` | `facebook/nllb-200-distilled-600M` | Local translation model. Options: distilled-600M (2.4GB, fast) or 1.3B (5.4GB, accurate) |
+| `KOKORO_VOICE` | `pf_dora` | Kokoro TTS voice. Options: `pf_dora` (F, energetic), `pm_alex` (M, natural), `pm_santa` (M, warm) |
+| `KOKORO_SPEED` | `1.0` | Speech rate multiplier. `1.0` = natural, `>1.0` = faster (to fit tight synthesis slots) |
+| `GRADIO_SERVER_PORT` | `7860` | Web UI port. Change to `8000`, `8080`, etc. to avoid conflicts |
+| `GRADIO_SERVER_NAME` | `0.0.0.0` | Server host. `0.0.0.0` = network accessible, `127.0.0.1` = localhost only |
+| `GRADIO_SHARE` | `false` | Enable public Gradio.live tunnel. Set to `true` for temporary sharing. |
+
+### Setting up OpenRouter (Optional)
+
+To enable LLM-based translation with better context awareness and PT-BR instructions:
+
+1. Sign up at [openrouter.ai](https://openrouter.ai/sign-up) (free tier: $5/month credits)
+2. Get your API key from the dashboard
+3. Open `.env` and paste your key into `OPENROUTER_API_KEY=sk-or-v1-...`
+4. Restart the app
+
+When enabled, OpenRouter is used for translation first; NLLB-200 runs as fallback if the request fails or the key is empty. Cost: ~$0.002 for a 10-minute video.
+
+### Customizing Models & Voice
+
+Edit `.env` to change any setting. Examples:
+
+```ini
+# Use larger, more accurate Whisper model
+WHISPER_MODEL=large-v3
+
+# Switch to Kokoro male voice
+KOKORO_VOICE=pm_alex
+
+# Speed up synthesis to fit tight clips
+KOKORO_SPEED=1.2
+
+# Run web UI on port 8080
+GRADIO_SERVER_PORT=8080
+
+# Use more accurate (but slower) NLLB model
+NLLB_MODEL=facebook/nllb-200-1.3B
+```
+
+Restart `start.bat` for changes to take effect.
+
+---
+
 ## Features
 
 ### Kokoro-82M TTS (New Default)
@@ -87,7 +140,7 @@ Before synthesis, Dubweave estimates the output duration for each segment using 
 
 ### LLM Translation via OpenRouter
 
-If you have an **OpenRouter API key**, Gemini 2.0 Flash translates at ~$0.002 per 10-minute video with explicit PT-BR system instructions (Brazilian vocabulary, `você` paradigm, gerund forms). NLLB-200 local translation is used automatically as a fallback if the key is absent or the request fails.
+If you set an **OpenRouter API key** in `.env` (see [Configuration](#configuration) section), Gemini 2.0 Flash translates at ~$0.002 per 10-minute video with explicit PT-BR system instructions (Brazilian vocabulary, `você` paradigm, gerund forms). NLLB-200 local translation is used automatically as a fallback if the key is empty or the request fails.
 
 ### SRT Subtitle Export
 

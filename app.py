@@ -17,6 +17,7 @@ from typing import Any, Callable, Generator, cast
 
 import warnings
 import gradio as gr
+from dotenv import load_dotenv
 
 # Suppress torch.load pickle warnings from TTS/XTTS internals.
 # These are known, safe, third-party model files — not a security concern here.
@@ -26,6 +27,7 @@ warnings.filterwarnings("ignore", message=".*resume_download.*", category=Future
 warnings.filterwarnings("ignore", message=".*weight_norm.*", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*dropout option.*", category=UserWarning)
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+load_dotenv()  # Load environment variables from .env file
 
 
 # ── Lazy imports (installed at runtime) ──────────────────────────────────────
@@ -50,23 +52,26 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 PROJECTS_DIR = Path(__file__).parent.resolve() / "projects"
 PROJECTS_DIR.mkdir(exist_ok=True)
 
-WHISPER_MODEL = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
-XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
-TARGET_LANG = "pt"  # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
+# Load config from .env, fallback to defaults if not set
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
+XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"  # Not configurable
+TARGET_LANG = "pt"  # XTTS v2 uses "pt" for all Portuguese; BR accent comes from voice ref
 
-# Kokoro config
-KOKORO_LANG = "p"  # PT-BR lang_code in Kokoro
-KOKORO_VOICE = "pf_dora"  # pf_dora (F), pm_alex (M), pm_santa (M)
-KOKORO_SPEED = 1.0  # 1.0 = natural rate; increase to fit tight slots
-# Translation config
-NLLB_MODEL = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, true PT-BR
-NLLB_SRC_LANG = "eng_Latn"
-NLLB_TGT_LANG = "por_Latn"  # Brazilian Portuguese in NLLB's FLORES-200 code
+# Kokoro config (from .env)
+KOKORO_LANG = os.getenv("KOKORO_LANG", "p")
+KOKORO_VOICE = os.getenv("KOKORO_VOICE", "pf_dora")
+KOKORO_SPEED = float(os.getenv("KOKORO_SPEED", "1.0"))
 
-OPENROUTER_MODEL = "google/gemini-2.0-flash-001"  # $0.10/M input, $0.40/M output — ~$0.002 per 10min video
-OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+# Translation config (from .env)
+NLLB_MODEL = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
+NLLB_SRC_LANG = os.getenv("NLLB_SRC_LANG", "eng_Latn")
+NLLB_TGT_LANG = os.getenv("NLLB_TGT_LANG", "por_Latn")
 
-JOB_MAX_AGE_H = 2  # hours before a stale job folder is eligible for cleanup
+# OpenRouter config (from .env)
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
+
+JOB_MAX_AGE_H = 2  # hours before a stale job folder is eligible for cleanup (not configurable)
 
 
 # ── Step helpers ──────────────────────────────────────────────────────────────
@@ -1718,7 +1723,6 @@ def run_pipeline(
     whisper_model: str,
     browser: str,
     cookies_file: str | None,
-    openrouter_key: str,
     project_name: str,
     resume_from: str,
     tts_engine: str = "XTTS v2 (voice clone)",
@@ -1726,6 +1730,8 @@ def run_pipeline(
     progress=gr.Progress(),
 ):
     logs = []
+    # Read API key from environment
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     proj = project_name.strip() or "default"
     pdir = project_dir(proj)
 
@@ -2196,26 +2202,6 @@ def build_ui():
 
         gr.HTML('<div style="height:8px"></div>')
 
-        with gr.Accordion("🔑 OpenRouter API Key (fallback translation)", open=False):
-            gr.HTML("""
-            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
-              <strong style="color:#00e5a0;">If a key is provided</strong>, OpenRouter is used <strong style="color:#e8e8f0;">first</strong> — it follows explicit PT-BR instructions and produces the best output.<br>
-              Model: <code style="color:#a99dff;">google/gemini-2.0-flash-001</code>.<br>
-              A 10-min video costs roughly <strong style="color:#00e5a0;">~$0.002</strong> via OpenRouter.<br>
-              <br>
-              If no key is given (or OpenRouter fails), <strong style="color:#e8e8f0;">NLLB-200</strong> runs locally on your GPU as fallback.<br>
-              Leave empty to use NLLB-200 only.
-            </div>
-            """)
-            openrouter_key_input = gr.Textbox(
-                placeholder="sk-or-v1-…",
-                label="OpenRouter API key",
-                type="password",
-                lines=1,
-            )
-
-        gr.HTML('<div style="height:8px"></div>')
-
         with gr.Accordion("🍪 YouTube Account (optional)", open=False):
             gr.HTML("""
             <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
@@ -2330,7 +2316,6 @@ def build_ui():
                 whisper_model_input,
                 browser_input,
                 cookies_file_input,
-                openrouter_key_input,
                 project_name_input,
                 resume_from_input,
                 tts_engine_input,
@@ -2346,9 +2331,9 @@ if __name__ == "__main__":
     demo = build_ui()
     demo.queue(max_size=3)
     demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
+        server_name=os.getenv("GRADIO_SERVER_NAME", "0.0.0.0"),
+        server_port=int(os.getenv("GRADIO_SERVER_PORT", "7860")),
+        share=os.getenv("GRADIO_SHARE", "false").lower() == "true",
         show_error=True,
         css=CSS,
     )

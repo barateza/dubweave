@@ -33,6 +33,7 @@ triton-windows = "*"           # Windows port of Triton — GPU kernels for Whis
 kokoro = "*"                   # Kokoro-82M TTS — 82M params, native PT-BR, Apache 2.0
 hf_xet = "*"                   # Faster HF downloads
 soundfile = "*"                # WAV I/O for Kokoro numpy output
+python-dotenv = "*"            # Load environment variables from .env file
 
 [tasks]
 download-nllb   = "python -W ignore::FutureWarning -c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
