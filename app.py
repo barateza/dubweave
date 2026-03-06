@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Any, Callable, Mapping, Optional
 
 import warnings
 import gradio as gr
@@ -40,6 +40,9 @@ WORK_DIR.mkdir(exist_ok=True)
 # pixi run may cd anywhere — a relative path is unreliable.
 OUTPUT_DIR = Path(__file__).parent.resolve() / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+PROJECTS_DIR = Path(__file__).parent.resolve() / "projects"
+PROJECTS_DIR.mkdir(exist_ok=True)
 
 WHISPER_MODEL  = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
 XTTS_MODEL     = "tts_models/multilingual/multi-dataset/xtts_v2"
@@ -146,7 +149,8 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     # ── Step 1: probe title/duration without downloading ─────────────────────
     title, duration = "video", 0
     try:
-        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:
+        probe_opts: Any = {**BASE_OPTS, "skip_download": True}
+        with yt.YoutubeDL(probe_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             title    = info.get("title", "video")
             duration = info.get("duration", 0)
@@ -169,8 +173,8 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
 
     for fmt in VIDEO_FORMATS:
         try:
-            opts = {**BASE_OPTS, "format": fmt,
-                    "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
+            opts: Any = {**BASE_OPTS, "format": fmt,
+                         "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
             with yt.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
@@ -210,7 +214,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         raw_audio_file = None
         for fmt in AUDIO_FORMATS:
             try:
-                opts = {
+                opts: Any = {
                     **BASE_OPTS,
                     "format": fmt,
                     "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
@@ -268,7 +272,7 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
 # These are the most common European Portuguese markers that NLLB and other
 # models default to. Replacing them with Brazilian equivalents covers ~90% of
 # the perceptible difference in everyday spoken content.
-_PTPT_TO_PTBR = [
+_PTPT_TO_PTBR: list[tuple[str, str | Callable]] = [
     # Pronouns / address
     (r"tu",            "você"),
     (r"te",            "te"),          # keep — both use "te" but context helps
@@ -324,13 +328,14 @@ _PTPT_TO_PTBR = [
 def _ptpt_to_ptbr(text: str) -> str:
     """Apply PT-PT → PT-BR lexical substitutions."""
     import re
+    from re import Match
     for pattern, replacement in _PTPT_TO_PTBR:
         if callable(replacement):
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         else:
             # Preserve capitalisation of the first letter
-            def _replace(m, repl=replacement):
-                if m.group(0)[0].isupper():
+            def _replace(m: Match, repl: str = replacement) -> str:
+                if m.group(0)[0].isupper() and len(repl) > 0:
                     return repl[0].upper() + repl[1:]
                 return repl
             text = re.sub(pattern, _replace, text, flags=re.IGNORECASE)
@@ -373,7 +378,8 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         outputs = pipe(batch, batch_size=min(8, len(batch)))
-        results.extend(o["translation_text"] for o in outputs)
+        if isinstance(outputs, list):
+            results.extend(o["translation_text"] for o in outputs if o and "translation_text" in o)
 
     # Post-process: convert remaining PT-PT markers to PT-BR
     results = [_ptpt_to_ptbr(t) for t in results]
@@ -503,7 +509,7 @@ def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[l
 
 # ── Segment merging ──────────────────────────────────────────────────────────
 
-def _merge_segments(segments: list) -> tuple[list, list]:
+def _merge_segments(segments: list) -> list:
     """
     Merge short/incomplete Whisper segments into utterance-sized units.
 
@@ -514,8 +520,7 @@ def _merge_segments(segments: list) -> tuple[list, list]:
     re-expand back to original segment granularity by duration proportion.
 
     Returns:
-        merged   — list of {start, end, text, children: [original indices]}
-        index_map — merged_idx → [original_seg_indices]
+        merged — list of {start, end, text, children: [original indices]}
     """
     import re
     TERMINAL = re.compile(r'[.!?]$')
@@ -1101,60 +1106,198 @@ def cleanup_stale_jobs(logs: list) -> list:
     return logs
 
 
+
+# ── Project persistence ───────────────────────────────────────────────────────
+
+STAGES = ["download", "transcribe", "translate", "synthesize", "assemble"]
+
+def project_dir(name: str) -> Path:
+    safe = "".join(c for c in name.strip() if c.isalnum() or c in " _-")[:60].strip()
+    if not safe:
+        safe = "project"
+    d = PROJECTS_DIR / safe
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def list_projects() -> list[str]:
+    if not PROJECTS_DIR.exists():
+        return []
+    return sorted(
+        d.name for d in PROJECTS_DIR.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    )
+
+
+def project_status(name: str) -> dict:
+    """Return which stage outputs exist for a project."""
+    d = project_dir(name)
+    return {
+        "download":   (d / "video.mp4").exists() and (d / "audio_orig.wav").exists(),
+        "transcribe": (d / "segments.json").exists(),
+        "translate":  (d / "translated.json").exists(),
+        "synthesize": (d / "timed_clips.json").exists(),
+        "assemble":   any((d / "outputs").glob("*.mp4")) if (d / "outputs").exists() else False,
+    }
+
+
+def save_project_stage(name: str, stage: str, data):
+    """Persist a stage output to the project directory."""
+    d = project_dir(name)
+    if stage == "download":
+        # data = (video_path, audio_path, title, duration)
+        # Files are already in job_dir; copy them to project dir
+        video_src, audio_src, title, duration = data
+        shutil.copy2(str(video_src), str(d / "video.mp4"))
+        shutil.copy2(str(audio_src), str(d / "audio_orig.wav"))
+        meta = {"title": title, "duration": duration}
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    elif stage == "transcribe":
+        (d / "segments.json").write_text(json.dumps(data), encoding="utf-8")
+    elif stage == "translate":
+        (d / "translated.json").write_text(json.dumps(data), encoding="utf-8")
+    elif stage == "synthesize":
+        # data = timed_clips list; WAV files already in job_dir/segments/
+        # Copy segment WAVs to project dir
+        seg_dst = d / "segments"
+        seg_dst.mkdir(exist_ok=True)
+        updated = []
+        for clip in data:
+            src_path = Path(clip["path"])
+            dst_path = seg_dst / src_path.name
+            if src_path.exists() and src_path != dst_path:
+                shutil.copy2(str(src_path), str(dst_path))
+            updated.append({**clip, "path": str(dst_path)})
+        (d / "timed_clips.json").write_text(json.dumps(updated), encoding="utf-8")
+    elif stage == "assemble":
+        # data = output_path string
+        out_dst = d / "outputs"
+        out_dst.mkdir(exist_ok=True)
+        dst = out_dst / Path(data).name
+        if Path(data) != dst:
+            shutil.copy2(data, str(dst))
+
+
+def load_project_stage(name: str, stage: str) -> typing.Any:
+    """Load a previously saved stage output from project directory."""
+    d = project_dir(name)
+    if stage == "download":
+        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        return d / "video.mp4", d / "audio_orig.wav", meta["title"], meta["duration"]
+    elif stage == "transcribe":
+        return json.loads((d / "segments.json").read_text(encoding="utf-8"))
+    elif stage == "translate":
+        return json.loads((d / "translated.json").read_text(encoding="utf-8"))
+    elif stage == "synthesize":
+        return json.loads((d / "timed_clips.json").read_text(encoding="utf-8"))
+    return None
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
-def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, browser: str, cookies_file: str | None, openrouter_key: str, progress=gr.Progress()):
+def run_pipeline(
+    url: str,
+    speaker_wav_path: str | None,
+    whisper_model: str,
+    browser: str,
+    cookies_file: str | None,
+    openrouter_key: str,
+    project_name: str,
+    resume_from: str,
+    progress=gr.Progress(),
+):
     logs = []
-    job_id = str(int(time.time()))
+    proj = project_name.strip() or "default"
+    pdir = project_dir(proj)
+
+    # Stage order for resume logic
+    stage_order = {s: i for i, s in enumerate(STAGES)}
+    resume_idx  = stage_order.get(resume_from, 0)
+
+    # job_dir: temp workspace for files generated this run
+    # (segment WAVs etc). Saved stages are persisted to pdir.
+    job_id  = str(int(time.time()))
     job_dir = WORK_DIR / job_id
     job_dir.mkdir(exist_ok=True)
 
-    # Resolve model: UI value overrides global default
     model_to_use = whisper_model.strip() if whisper_model.strip() else WHISPER_MODEL
 
     try:
         lazy_import()
-
-        # Sweep stale jobs from previous runs before starting
         logs = cleanup_stale_jobs(logs)
-        if cookies_file:
-            cookie_msg = f"cookies.txt ({Path(cookies_file).name})"
-        elif browser != "none":
-            cookie_msg = f"browser cookies ({browser})"
+        logs = log(f"📁 Project: {proj}  |  Resume from: {resume_from}", logs)
+        yield None, "\n".join(logs)
+
+        # ── Download ──────────────────────────────────────────────────────────
+        if resume_idx <= stage_order["download"]:
+            if cookies_file:
+                cookie_msg = f"cookies.txt ({Path(cookies_file).name})"
+            elif browser != "none":
+                cookie_msg = f"browser cookies ({browser})"
+            else:
+                cookie_msg = "anonymous (no cookies)"
+            logs = log(f"🍪 Download mode: {cookie_msg}", logs)
+            yield None, "\n".join(logs)
+
+            progress(0.05, desc="Downloading…")
+            video_path, audio_path, title, duration, logs = download_video(
+                url, job_dir, logs, browser=browser, cookies_file=cookies_file
+            )
+            save_project_stage(proj, "download", (video_path, audio_path, title, duration))
+            yield None, "\n".join(logs)
         else:
-            cookie_msg = "anonymous (no cookies)"
-        logs = log(f"🍪 Download mode: {cookie_msg}", logs)
-        yield None, "\n".join(logs)
+            logs = log("⏭️  Skipping download (loaded from project)", logs)
+            video_path, audio_path, title, duration = load_project_stage(proj, "download")
+            logs = log(f"   📹 {title} ({duration}s)", logs)
+            yield None, "\n".join(logs)
 
-        progress(0.05, desc="Downloading…")
-        video_path, audio_path, title, duration, logs = download_video(
-            url, job_dir, logs, browser=browser, cookies_file=cookies_file
-        )
-        yield None, "\n".join(logs)
+        # ── Transcribe ────────────────────────────────────────────────────────
+        if resume_idx <= stage_order["transcribe"]:
+            progress(0.2, desc="Transcribing…")
+            segments, logs = transcribe_audio(audio_path, logs, model_name=model_to_use)
+            save_project_stage(proj, "transcribe", segments)
+            yield None, "\n".join(logs)
+        else:
+            logs = log("⏭️  Skipping transcription (loaded from project)", logs)
+            segments = load_project_stage(proj, "transcribe")
+            logs = log(f"   📝 {len(segments)} segments loaded", logs)
+            yield None, "\n".join(logs)
 
-        progress(0.2, desc="Transcribing…")
-        segments, logs = transcribe_audio(audio_path, logs, model_name=model_to_use)
-        yield None, "\n".join(logs)
+        # ── Translate ─────────────────────────────────────────────────────────
+        if resume_idx <= stage_order["translate"]:
+            progress(0.4, desc="Translating…")
+            translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key)
+            progress(0.5, desc="Checking timing budget…")
+            translated, logs = apply_timing_budget(translated, logs, openrouter_key=openrouter_key)
+            save_project_stage(proj, "translate", translated)
+            yield None, "\n".join(logs)
+        else:
+            logs = log("⏭️  Skipping translation (loaded from project)", logs)
+            translated = load_project_stage(proj, "translate")
+            logs = log(f"   🌐 {len(translated)} translated segments loaded", logs)
+            yield None, "\n".join(logs)
 
-        progress(0.4, desc="Translating…")
-        translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key)
-        yield None, "\n".join(logs)
+        # ── Synthesize ────────────────────────────────────────────────────────
+        if resume_idx <= stage_order["synthesize"]:
+            progress(0.55, desc="Synthesizing voice…")
+            timed_clips, logs = synthesize_segments(
+                translated, audio_path, job_dir, logs,
+                speaker_wav=speaker_wav_path
+            )
+            save_project_stage(proj, "synthesize", timed_clips)
+            yield None, "\n".join(logs)
+        else:
+            logs = log("⏭️  Skipping synthesis (loaded from project)", logs)
+            timed_clips = load_project_stage(proj, "synthesize")
+            logs = log(f"   🔊 {len(timed_clips)} audio clips loaded", logs)
+            yield None, "\n".join(logs)
 
-        progress(0.5, desc="Checking timing budget…")
-        translated, logs = apply_timing_budget(translated, logs, openrouter_key=openrouter_key)
-        yield None, "\n".join(logs)
-
-        progress(0.55, desc="Synthesizing voice…")
-        timed_clips, logs = synthesize_segments(
-            translated, audio_path, job_dir, logs,
-            speaker_wav=speaker_wav_path
-        )
-        yield None, "\n".join(logs)
-
+        # ── Assemble ──────────────────────────────────────────────────────────
         progress(0.85, desc="Assembling video…")
         output_path, logs = assemble_dubbed_video(
-            video_path, timed_clips, duration, job_dir, title, logs
+            video_path, timed_clips, float(duration or 0), job_dir, title or "video", logs
         )
+        save_project_stage(proj, "assemble", output_path)
         progress(1.0, desc="Done!")
         yield output_path, "\n".join(logs)
 
@@ -1163,9 +1306,6 @@ def run_pipeline(url: str, speaker_wav_path: str | None, whisper_model: str, bro
         logs = log(f"❌ Error: {e}\n{traceback.format_exc()}", logs)
         yield None, "\n".join(logs)
     finally:
-        # Always clean current job dir — runs on success, exception, AND
-        # graceful Gradio cancellation. Does NOT run on SIGKILL (OS kill),
-        # which is why cleanup_stale_jobs() handles those on next startup.
         shutil.rmtree(str(job_dir), ignore_errors=True)
 
 
@@ -1410,10 +1550,42 @@ def build_ui():
 
         with gr.Row():
             with gr.Column(scale=3):
-                gr.HTML('<div class="panel-label">01 · Input</div>')
+                gr.HTML('<div class="panel-label">01 · Project</div>')
+                with gr.Row():
+                    project_name_input = gr.Textbox(
+                        placeholder="my-video (letters, numbers, hyphens)",
+                        label="Project name",
+                        lines=1,
+                        scale=2,
+                    )
+                    resume_from_input = gr.Dropdown(
+                        choices=["download", "transcribe", "translate", "synthesize", "assemble"],
+                        value="download",
+                        label="Resume from stage",
+                        scale=1,
+                    )
+                project_status_html = gr.HTML("<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>Enter a project name to see its status.</div>")
+
+        def refresh_status(name):
+            name = name.strip()
+            if not name:
+                return "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;'>Enter a project name to see its status.</div>"
+            status = project_status(name)
+            icons = {True: "<span style='color:#00e5a0'>✓</span>", False: "<span style='color:#3a3a58'>○</span>"}
+            parts = " &nbsp;·&nbsp; ".join(
+                f"{icons[v]} {s}" for s, v in status.items()
+            )
+            return f"<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>{parts}</div>"
+
+        project_name_input.change(fn=refresh_status, inputs=project_name_input, outputs=project_status_html)
+
+        gr.HTML('<div style="height:8px"></div>')
+        gr.HTML('<div class="panel-label">02 · Input</div>')
+        with gr.Row():
+            with gr.Column(scale=3):
                 url_input = gr.Textbox(
                     placeholder="https://youtube.com/watch?v=…",
-                    label="YouTube URL",
+                    label="YouTube URL (required for download stage, ignored otherwise)",
                     lines=1,
                 )
 
@@ -1510,7 +1682,7 @@ def build_ui():
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
 
         gr.HTML('<div style="height:20px"></div>')
-        gr.HTML('<div class="panel-label">02 · Progress</div>')
+        gr.HTML('<div class="panel-label">03 · Progress</div>')
         log_output = gr.Textbox(
             label="Pipeline log",
             lines=14,
@@ -1520,20 +1692,20 @@ def build_ui():
         )
 
         gr.HTML('<div style="height:4px"></div>')
-        gr.HTML('<div class="panel-label">03 · Output</div>')
+        gr.HTML('<div class="panel-label">04 · Output</div>')
         video_output = gr.Video(label="Dubbed video (PT-BR)")
 
         gr.HTML("""
         <div style="text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #2a2a3e;">
           <p style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#3a3a58;">
-            XTTS v2 · Whisper · Argos Translate · yt-dlp · FFmpeg · RTX 4070 Super
+            XTTS v2 · Whisper · NLLB-200 / Gemini · yt-dlp · FFmpeg · RTX 4070 Super
           </p>
         </div>
         """)
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input],
+            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input, project_name_input, resume_from_input],
             outputs=[video_output, log_output],
         )
 
