@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Generator, cast
+from typing import Any, Callable, Generator, cast
 
 import warnings
 import gradio as gr
@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore", message=".*weight_norm.*", category=FutureWarn
 warnings.filterwarnings("ignore", message=".*dropout option.*", category=UserWarning)
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+
 # ── Lazy imports (installed at runtime) ──────────────────────────────────────
 def lazy_import():
     global yt_dlp, whisper, torch, TTS
@@ -34,6 +35,7 @@ def lazy_import():
     import whisper
     import torch
     from TTS.api import TTS
+
     return True
 
 
@@ -48,26 +50,27 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 PROJECTS_DIR = Path(__file__).parent.resolve() / "projects"
 PROJECTS_DIR.mkdir(exist_ok=True)
 
-WHISPER_MODEL  = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
-XTTS_MODEL     = "tts_models/multilingual/multi-dataset/xtts_v2"
-TARGET_LANG    = "pt"               # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
+WHISPER_MODEL = "large-v3-turbo"  # swap to "large-v3" for max accuracy on noisy audio
+XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+TARGET_LANG = "pt"  # XTTS v2 uses "pt" for all Portuguese; BR accent comes from the voice reference clip
 
 # Kokoro config
-KOKORO_LANG    = "p"                # PT-BR lang_code in Kokoro
-KOKORO_VOICE   = "pf_dora"          # pf_dora (F), pm_alex (M), pm_santa (M)
-KOKORO_SPEED   = 1.0                # 1.0 = natural rate; increase to fit tight slots
+KOKORO_LANG = "p"  # PT-BR lang_code in Kokoro
+KOKORO_VOICE = "pf_dora"  # pf_dora (F), pm_alex (M), pm_santa (M)
+KOKORO_SPEED = 1.0  # 1.0 = natural rate; increase to fit tight slots
 # Translation config
-NLLB_MODEL      = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, true PT-BR
-NLLB_SRC_LANG   = "eng_Latn"
-NLLB_TGT_LANG   = "por_Latn"   # Brazilian Portuguese in NLLB's FLORES-200 code
+NLLB_MODEL = "facebook/nllb-200-distilled-600M"  # ~2.4GB, runs on GPU, true PT-BR
+NLLB_SRC_LANG = "eng_Latn"
+NLLB_TGT_LANG = "por_Latn"  # Brazilian Portuguese in NLLB's FLORES-200 code
 
 OPENROUTER_MODEL = "google/gemini-2.0-flash-001"  # $0.10/M input, $0.40/M output — ~$0.002 per 10min video
-OPENROUTER_BASE  = "https://openrouter.ai/api/v1"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-JOB_MAX_AGE_H  = 2       # hours before a stale job folder is eligible for cleanup
+JOB_MAX_AGE_H = 2  # hours before a stale job folder is eligible for cleanup
 
 
 # ── Step helpers ──────────────────────────────────────────────────────────────
+
 
 def log(msg: str, logs: list) -> list:
     timestamp = time.strftime("%H:%M:%S")
@@ -77,7 +80,13 @@ def log(msg: str, logs: list) -> list:
     return logs
 
 
-def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", cookies_file: str | None = None):
+def download_video(
+    url: str,
+    job_dir: Path,
+    logs: list,
+    browser: str = "none",
+    cookies_file: str | None = None,
+):
     """
     Download video + audio with a self-healing format cascade.
 
@@ -114,15 +123,19 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
 
     # ── Detect aria2c and deno availability ──────────────────────────────────
     import shutil as _shutil
+
     _aria2c = _shutil.which("aria2c")
-    _deno   = _shutil.which("deno")
+    _deno = _shutil.which("deno")
 
     if _aria2c:
         logs = log(f"   aria2c found — using for accelerated download", logs)
     if _deno:
         logs = log(f"   deno found — YouTube JS challenge solving enabled", logs)
     else:
-        logs = log("   ⚠️  deno not found — some YouTube formats may be missing (run setup.bat)", logs)
+        logs = log(
+            "   ⚠️  deno not found — some YouTube formats may be missing (run setup.bat)",
+            logs,
+        )
 
     BASE_OPTS: dict[str, Any] = {
         "outtmpl": str(job_dir / "%(id)s_%(format_id)s.%(ext)s"),
@@ -134,25 +147,37 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         # cookies.txt = Netscape format exported from browser extension.
         # browser     = yt-dlp reads directly from browser profile (may fail if Chrome is open).
         # neither     = anonymous download (may trigger PO token / JS challenge errors).
-        **({"cookiefile": cookies_file} if cookies_file
-           else {"cookiesfrombrowser": (browser, None, None, None)} if browser != "none"
-           else {}),
+        **(
+            {"cookiefile": cookies_file}
+            if cookies_file
+            else (
+                {"cookiesfrombrowser": (browser, None, None, None)}
+                if browser != "none"
+                else {}
+            )
+        ),
         **({"remote_components": ["ejs:github"]} if _deno else {}),
         # ── aria2c: multi-connection download via your local RPC server ───────
         # Falls back to yt-dlp's built-in downloader if aria2c is not in PATH.
-        **({"external_downloader": "aria2c",
-            "external_downloader_args": {
-                "aria2c": [
-                    "--rpc-save-upload-metadata=false",
-                    "--file-allocation=none",        # faster start, skip prealloc
-                    "--optimize-concurrent-downloads=true",
-                    "--max-connection-per-server=4", # YouTube allows ~4 per URL
-                    "--min-split-size=5M",
-                    "--split=4",
-                    "--max-tries=5",
-                    "--retry-wait=3",
-                ]
-            }} if _aria2c else {}),
+        **(
+            {
+                "external_downloader": "aria2c",
+                "external_downloader_args": {
+                    "aria2c": [
+                        "--rpc-save-upload-metadata=false",
+                        "--file-allocation=none",  # faster start, skip prealloc
+                        "--optimize-concurrent-downloads=true",
+                        "--max-connection-per-server=4",  # YouTube allows ~4 per URL
+                        "--min-split-size=5M",
+                        "--split=4",
+                        "--max-tries=5",
+                        "--retry-wait=3",
+                    ]
+                },
+            }
+            if _aria2c
+            else {}
+        ),
     }
 
     # ── Step 1: probe title/duration without downloading ─────────────────────
@@ -160,7 +185,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     try:
         with yt.YoutubeDL(cast(Any, {**BASE_OPTS, "skip_download": True})) as ydl:
             info = ydl.extract_info(url, download=False)
-            title    = info.get("title", "video")
+            title = info.get("title", "video")
             duration = info.get("duration", 0)
             video_id = info.get("id", "video")
     except Exception as e:
@@ -176,13 +201,19 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         "18",
     ]
 
-    muxed_fallback = False   # True when video already contains audio
+    muxed_fallback = False  # True when video already contains audio
     raw_video_file = None
 
     for fmt in VIDEO_FORMATS:
         try:
-            opts = cast(Any, {**BASE_OPTS, "format": fmt,
-                              "outtmpl": str(job_dir / f"video_raw.%(ext)s")})
+            opts = cast(
+                Any,
+                {
+                    **BASE_OPTS,
+                    "format": fmt,
+                    "outtmpl": str(job_dir / f"video_raw.%(ext)s"),
+                },
+            )
             with yt.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
@@ -195,7 +226,9 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
             logs = log(f"   Video format '{fmt}' failed: {e!s:.80}", logs)
 
     if raw_video_file is None:
-        raise RuntimeError("All video format fallbacks exhausted — cannot download video.")
+        raise RuntimeError(
+            "All video format fallbacks exhausted — cannot download video."
+        )
 
     shutil.move(str(raw_video_file), str(video_path))
 
@@ -204,11 +237,24 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     # download needed and avoids re-triggering any challenge issues.
     if muxed_fallback:
         logs = log("   Muxed fallback — extracting audio from video file…", logs)
-        result = subprocess.run([
-            "ffmpeg", "-y", "-i", str(video_path),
-            "-vn", "-ar", "44100", "-ac", "2", "-f", "wav",
-            str(audio_path)
-        ], capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(video_path),
+                "-vn",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                "-f",
+                "wav",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg audio extract failed: {result.stderr[-300:]}")
     else:
@@ -222,44 +268,67 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         raw_audio_file = None
         for fmt in AUDIO_FORMATS:
             try:
-                opts = cast(Any, {
-                    **BASE_OPTS,
-                    "format": fmt,
-                    "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
-                    "postprocessors": [{
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "wav",
-                        "preferredquality": "0",
-                    }],
-                })
+                opts = cast(
+                    Any,
+                    {
+                        **BASE_OPTS,
+                        "format": fmt,
+                        "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
+                        "postprocessors": [
+                            {
+                                "key": "FFmpegExtractAudio",
+                                "preferredcodec": "wav",
+                                "preferredquality": "0",
+                            }
+                        ],
+                    },
+                )
                 with yt.YoutubeDL(opts) as ydl:
                     ydl.extract_info(url, download=True)
                 candidates = list(job_dir.glob("audio_raw.*"))
                 if candidates:
                     raw_audio_file = candidates[0]
-                    logs = log(f"   Audio format '{fmt}' ✓  ({raw_audio_file.name})", logs)
+                    logs = log(
+                        f"   Audio format '{fmt}' ✓  ({raw_audio_file.name})", logs
+                    )
                     break
             except Exception as e:
                 logs = log(f"   Audio format '{fmt}' failed: {e!s:.80}", logs)
 
         if raw_audio_file is None:
             # absolute last resort: extract from whatever video we have
-            logs = log("   All audio formats failed — extracting from video file…", logs)
-            subprocess.run([
-                "ffmpeg", "-y", "-i", str(video_path),
-                "-vn", "-ar", "44100", "-ac", "2", "-f", "wav",
-                str(audio_path)
-            ], capture_output=True, check=True)
+            logs = log(
+                "   All audio formats failed — extracting from video file…", logs
+            )
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(video_path),
+                    "-vn",
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "2",
+                    "-f",
+                    "wav",
+                    str(audio_path),
+                ],
+                capture_output=True,
+                check=True,
+            )
         else:
             shutil.move(str(raw_audio_file), str(audio_path))
 
-    logs = log(f"✅ Downloaded: \"{title}\" ({duration}s)", logs)
+    logs = log(f'✅ Downloaded: "{title}" ({duration}s)', logs)
     return video_path, audio_path, title, duration, logs
 
 
 def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MODEL):
     """Transcribe audio with Whisper, return segments with timestamps."""
     import whisper
+
     logs = log(f"🎙️ Transcribing with Whisper ({model_name})…", logs)
 
     model = whisper.load_model(model_name)
@@ -282,69 +351,81 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
 # the perceptible difference in everyday spoken content.
 _PTPT_TO_PTBR = [
     # Pronouns / address
-    (r"tu",            "você"),
-    (r"te",            "te"),          # keep — both use "te" but context helps
-    (r"teu",           "seu"),
-    (r"tua",           "sua"),
-    (r"teus",          "seus"),
-    (r"tuas",          "suas"),
-    (r"vós",           "vocês"),
+    (r"tu", "você"),
+    (r"te", "te"),  # keep — both use "te" but context helps
+    (r"teu", "seu"),
+    (r"tua", "sua"),
+    (r"teus", "seus"),
+    (r"tuas", "suas"),
+    (r"vós", "vocês"),
     # Verb forms — 2nd person → 3rd person (você paradigm)
-    (r"estás",         "está"),
-    (r"gostavas",      "gostava"),
-    (r"gostas",        "gosta"),
-    (r"fazes",         "faz"),
-    (r"podes",         "pode"),
-    (r"queres",        "quer"),
-    (r"sabes",         "sabe"),
-    (r"tens",          "tem"),
-    (r"vens",          "vem"),
-    (r"dizes",         "diz"),
-    (r"vês",           "vê"),
-    (r"vais",          "vai"),
-    (r"ficas",         "fica"),
-    (r"perceber",      "entender"),
+    (r"estás", "está"),
+    (r"gostavas", "gostava"),
+    (r"gostas", "gosta"),
+    (r"fazes", "faz"),
+    (r"podes", "pode"),
+    (r"queres", "quer"),
+    (r"sabes", "sabe"),
+    (r"tens", "tem"),
+    (r"vens", "vem"),
+    (r"dizes", "diz"),
+    (r"vês", "vê"),
+    (r"vais", "vai"),
+    (r"ficas", "fica"),
+    (r"perceber", "entender"),
     # Gerund — PT-PT uses infinitive constructions, PT-BR uses gerund
     # "a verificar" → "verificando", "a fazer" → "fazendo" etc.
-    (r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
-     lambda m: m.group(1) + "ndo"),
+    (
+        r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
+        lambda m: m.group(1) + "ndo",
+    ),
     # Specific common phrases
-    (r"miúdos",        "crianças"),
-    (r"fixe",          "legal"),
-    (r"giro",          "bonito"),
-    (r"chato",         "chato"),   # same but keep
-    (r"propriamente",  "corretamente"),
-    (r"sempre que",    "sempre que"),
-    (r"certamente",    "certamente"),
-    (r"apenas",        "só"),
-    (r"somente",       "só"),
-    (r"imensamente",   "muito"),
-    (r"imenso",        "enorme"),
-    (r"autocarro",     "ônibus"),
-    (r"comboio",       "trem"),
-    (r"telemovel",     "celular"),
-    (r"telemovel",     "celular"),
-    (r"telemóvel",     "celular"),
-    (r"passeio",       "calçada"),
-    (r"petróleos",     "petróleo"),
-    (r"casas de banho","banheiros"),
+    (r"miúdos", "crianças"),
+    (r"fixe", "legal"),
+    (r"giro", "bonito"),
+    (r"chato", "chato"),  # same but keep
+    (r"propriamente", "corretamente"),
+    (r"sempre que", "sempre que"),
+    (r"certamente", "certamente"),
+    (r"apenas", "só"),
+    (r"somente", "só"),
+    (r"imensamente", "muito"),
+    (r"imenso", "enorme"),
+    (r"autocarro", "ônibus"),
+    (r"comboio", "trem"),
+    (r"telemovel", "celular"),
+    (r"telemovel", "celular"),
+    (r"telemóvel", "celular"),
+    (r"passeio", "calçada"),
+    (r"petróleos", "petróleo"),
+    (r"casas de banho", "banheiros"),
     (r"casa de banho", "banheiro"),
-    (r"saneamento",    "saneamento"),
-    (r"futebol",       "futebol"),  # same
+    (r"saneamento", "saneamento"),
+    (r"futebol", "futebol"),  # same
 ]
+
 
 def _ptpt_to_ptbr(text: str) -> str:
     """Apply PT-PT → PT-BR lexical substitutions."""
     import re
+
     for pattern, replacement in _PTPT_TO_PTBR:
         if callable(replacement):
-            text = str(re.sub(pattern, replacement, text, flags=re.IGNORECASE))
+            text = str(
+                re.sub(
+                    pattern,
+                    cast(Callable[[re.Match[str]], str], replacement),
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
         else:
             # Preserve capitalisation of the first letter
             def _replace(m: re.Match[str], repl: str = cast(str, replacement)) -> str:
                 if m.group(0)[0].isupper():
                     return repl[0].upper() + repl[1:]
                 return repl
+
             text = str(re.sub(pattern, _replace, text, flags=re.IGNORECASE))
     return text
 
@@ -352,6 +433,7 @@ def _ptpt_to_ptbr(text: str) -> str:
 # ── NLLB-200 translation (primary) ───────────────────────────────────────────
 
 _nllb_pipeline = None  # module-level cache — load once, reuse across jobs
+
 
 def _get_nllb_pipeline(logs: list):
     """Load NLLB-200 translation pipeline, cached after first load."""
@@ -383,7 +465,7 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
     results = []
     batch_size = 32
     for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
+        batch = texts[i : i + batch_size]
         outputs = cast(list, pipe(batch, batch_size=min(8, len(batch))))
         results.extend(o["translation_text"] for o in outputs)
 
@@ -409,7 +491,9 @@ SYSTEM_PROMPT = (
 )
 
 
-def _call_openrouter(texts: list[str], api_key: str, context: list[str] | None = None) -> list[str]:
+def _call_openrouter(
+    texts: list[str], api_key: str, context: list[str] | None = None
+) -> list[str]:
     """Single API call: translate a chunk of texts, return list of strings.
 
     context: previously translated utterances prepended as read-only context
@@ -435,14 +519,16 @@ def _call_openrouter(texts: list[str], api_key: str, context: list[str] | None =
         f"{numbered}"
     )
 
-    payload = json.dumps({
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_msg},
-        ],
-        "temperature": 0.1,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": OPENROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.1,
+        }
+    ).encode()
 
     req = urllib.request.Request(
         f"{OPENROUTER_BASE}/chat/completions",
@@ -470,7 +556,9 @@ def _call_openrouter(texts: list[str], api_key: str, context: list[str] | None =
     return result
 
 
-def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[list[str], list]:
+def _translate_openrouter(
+    texts: list[str], api_key: str, logs: list
+) -> tuple[list[str], list]:
     """
     Translate via OpenRouter in chunks of 60 utterances with a 3-utterance
     context window prepended to each chunk.
@@ -483,25 +571,31 @@ def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[l
     """
     logs = log(f"🌐 Translating via OpenRouter ({OPENROUTER_MODEL})…", logs)
 
-    CHUNK   = 60   # smaller than 80 to leave room for context tokens
-    CONTEXT = 3    # preceding utterances to include as read-only context
+    CHUNK = 60  # smaller than 80 to leave room for context tokens
+    CONTEXT = 3  # preceding utterances to include as read-only context
     all_translated = []
     total_chunks = (len(texts) + CHUNK - 1) // CHUNK
 
     for chunk_i in range(total_chunks):
-        chunk = texts[chunk_i * CHUNK:(chunk_i + 1) * CHUNK]
-        ctx   = all_translated[-CONTEXT:] if all_translated else []
+        chunk = texts[chunk_i * CHUNK : (chunk_i + 1) * CHUNK]
+        ctx = all_translated[-CONTEXT:] if all_translated else []
 
-        logs = log(f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} utterances, {len(ctx)} context)…", logs)
+        logs = log(
+            f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} utterances, {len(ctx)} context)…",
+            logs,
+        )
 
         result = _call_openrouter(chunk, api_key, context=ctx)
 
         # Safety: pad with originals if count mismatches
         if len(result) != len(chunk):
-            logs = log(f"   ⚠️  Got {len(result)} back for {len(chunk)} sent — padding with originals", logs)
+            logs = log(
+                f"   ⚠️  Got {len(result)} back for {len(chunk)} sent — padding with originals",
+                logs,
+            )
             while len(result) < len(chunk):
                 result.append(chunk[len(result)])
-            result = result[:len(chunk)]
+            result = result[: len(chunk)]
 
         all_translated.extend(result)
 
@@ -514,6 +608,7 @@ def _translate_openrouter(texts: list[str], api_key: str, logs: list) -> tuple[l
 # ── Public translate_segments (NLLB primary, OpenRouter fallback) ─────────────
 
 # ── Segment merging ──────────────────────────────────────────────────────────
+
 
 def _merge_segments(segments: list) -> list:
     """
@@ -530,7 +625,8 @@ def _merge_segments(segments: list) -> list:
         index_map — merged_idx → [original_seg_indices]
     """
     import re
-    TERMINAL = re.compile(r'[.!?]$')
+
+    TERMINAL = re.compile(r"[.!?]$")
     MIN_WORDS = 4
 
     merged = []
@@ -554,12 +650,14 @@ def _merge_segments(segments: list) -> list:
 
         # Flush if: terminal punctuation AND enough words, or too long (safety)
         if (has_terminal and word_count >= MIN_WORDS) or word_count >= 40:
-            merged.append({
-                "start":    current_start,
-                "end":      seg["end"],
-                "text":     current_text,
-                "children": current_children[:],
-            })
+            merged.append(
+                {
+                    "start": current_start,
+                    "end": seg["end"],
+                    "text": current_text,
+                    "children": current_children[:],
+                }
+            )
             current_text = ""
             current_start = None
             current_children = []
@@ -567,12 +665,14 @@ def _merge_segments(segments: list) -> list:
     # Flush any trailing fragment
     if current_text:
         last_end = segments[current_children[-1]]["end"]
-        merged.append({
-            "start":    current_start,
-            "end":      last_end,
-            "text":     current_text,
-            "children": current_children[:],
-        })
+        merged.append(
+            {
+                "start": current_start,
+                "end": last_end,
+                "text": current_text,
+                "children": current_children[:],
+            }
+        )
 
     return merged
 
@@ -580,7 +680,7 @@ def _merge_segments(segments: list) -> list:
 def _group_for_synthesis(translated: list) -> list:
     """
     Group translated segments back into utterances for sentence-level synthesis.
-    
+
     After expand_merged, segments are broken at acoustic boundaries mid-sentence.
     This re-groups them into complete utterances (terminal punctuation + ≥4 words)
     so each utterance is synthesized as a single natural-sounding TTS call.
@@ -602,11 +702,13 @@ def _expand_merged(merged_translated: list, original_segments: list) -> list:
     for utt in merged_translated:
         children = utt["children"]
         if len(children) == 1:
-            result.append({
-                "start": original_segments[children[0]]["start"],
-                "end":   original_segments[children[0]]["end"],
-                "text":  utt["text"],
-            })
+            result.append(
+                {
+                    "start": original_segments[children[0]]["start"],
+                    "end": original_segments[children[0]]["end"],
+                    "text": utt["text"],
+                }
+            )
             continue
 
         # Distribute translated text by word proportion across children
@@ -618,11 +720,13 @@ def _expand_merged(merged_translated: list, original_segments: list) -> list:
         if total_dur <= 0:
             # Degenerate: give all text to first child
             for j, c in enumerate(children):
-                result.append({
-                    "start": original_segments[c]["start"],
-                    "end":   original_segments[c]["end"],
-                    "text":  utt["text"] if j == 0 else "…",
-                })
+                result.append(
+                    {
+                        "start": original_segments[c]["start"],
+                        "end": original_segments[c]["end"],
+                        "text": utt["text"] if j == 0 else "…",
+                    }
+                )
             continue
 
         word_cursor = 0
@@ -634,19 +738,23 @@ def _expand_merged(merged_translated: list, original_segments: list) -> list:
                 word_slice = translated_words[word_cursor:]
             else:
                 n_words = max(1, round(len(translated_words) * proportion))
-                word_slice = translated_words[word_cursor:word_cursor + n_words]
+                word_slice = translated_words[word_cursor : word_cursor + n_words]
                 word_cursor += n_words
 
-            result.append({
-                "start": original_segments[c]["start"],
-                "end":   original_segments[c]["end"],
-                "text":  " ".join(word_slice) if word_slice else "…",
-            })
+            result.append(
+                {
+                    "start": original_segments[c]["start"],
+                    "end": original_segments[c]["end"],
+                    "text": " ".join(word_slice) if word_slice else "…",
+                }
+            )
 
     return result
 
 
-def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> tuple[list, list]:
+def translate_segments(
+    segments: list, logs: list, openrouter_key: str = ""
+) -> tuple[list, list]:
     """
     Translate segments EN→PT-BR.
 
@@ -662,7 +770,10 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
     """
     # ── Step 1: merge ─────────────────────────────────────────────────────────
     merged = _merge_segments(segments)
-    logs = log(f"   Merged {len(segments)} Whisper segments → {len(merged)} utterances for translation", logs)
+    logs = log(
+        f"   Merged {len(segments)} Whisper segments → {len(merged)} utterances for translation",
+        logs,
+    )
     merged_texts = [u["text"] for u in merged]
 
     # ── Step 2: translate ─────────────────────────────────────────────────────
@@ -683,12 +794,16 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
         try:
             logs = log("🌐 Translating EN → PT-BR (NLLB-200 local)…", logs)
             translated_texts, logs = _translate_nllb(merged_texts, logs)
-            logs = log(f"✅ Translated {len(translated_texts)} utterances (NLLB-200)", logs)
+            logs = log(
+                f"✅ Translated {len(translated_texts)} utterances (NLLB-200)", logs
+            )
         except Exception as e:
             raise RuntimeError(
-                ("All translators failed.\n"
-                + (f"OpenRouter error: {primary_error}\n" if primary_error else "")
-                + f"NLLB error: {e}")
+                (
+                    "All translators failed.\n"
+                    + (f"OpenRouter error: {primary_error}\n" if primary_error else "")
+                    + f"NLLB error: {e}"
+                )
             )
 
     # Empty-translation safety: fall back to original English per utterance
@@ -700,7 +815,9 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
             empty_count += 1
         merged[i] = {**utt, "text": clean}
     if empty_count:
-        logs = log(f"   ⚠️  {empty_count} empty translation(s) — kept original English", logs)
+        logs = log(
+            f"   ⚠️  {empty_count} empty translation(s) — kept original English", logs
+        )
 
     # ── Step 3: re-expand to original segment granularity ────────────────────
     translated = _expand_merged(merged, segments)
@@ -713,7 +830,7 @@ def translate_segments(segments: list, logs: list, openrouter_key: str = "") -> 
 # XTTS v2 synthesizes Portuguese at roughly this many characters per second
 # at natural speaking rate. Measured empirically on a range of texts.
 # Used to estimate output duration from character count before synthesis.
-XTTS_CHARS_PER_SEC = 18.0   # conservative estimate; real range is 15–22
+XTTS_CHARS_PER_SEC = 18.0  # conservative estimate; real range is 15–22
 
 # PT-BR is structurally ~15% longer than English in character count after
 # translation (more syllables, obligatory pronouns, verbal inflection).
@@ -760,19 +877,25 @@ def _trim_to_budget(text: str, budget_secs: float, openrouter_key: str) -> str:
     # LLM rephrase: ask for same meaning in fewer words
     try:
         import urllib.request as _ur
+
         prompt = (
             f"Rephrase this Brazilian Portuguese text to express the same meaning "
             f"in at most {char_budget} characters. "
             f"Output ONLY the rephrased text, nothing else.\n\n{text}"
         )
-        payload = json.dumps({
-            "model": OPENROUTER_MODEL,
-            "messages": [
-                {"role": "system", "content": "You are a Brazilian Portuguese editor. Shorten text while preserving meaning. Never add explanations."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.1,
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a Brazilian Portuguese editor. Shorten text while preserving meaning. Never add explanations.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+            }
+        ).encode()
         req = _ur.Request(
             f"{OPENROUTER_BASE}/chat/completions",
             data=payload,
@@ -842,7 +965,7 @@ def apply_timing_budget(
             f"   ⏱️  {overflow_count} segments predicted to overflow slot — "
             f"{trimmed_count} shortened pre-synthesis, "
             f"{overflow_count - trimmed_count} within atempo range",
-            logs
+            logs,
         )
     else:
         logs = log("   ⏱️  All segments within timing budget", logs)
@@ -852,6 +975,7 @@ def apply_timing_budget(
 
 import re
 
+
 def _sanitize_for_tts(text: str) -> str:
     """
     Clean text before passing to XTTS.
@@ -859,34 +983,34 @@ def _sanitize_for_tts(text: str) -> str:
     XTTS reads aloud instead of treating as prosody cues.
     """
     spelled = [
-        (r"\bponto e v\u00edrgula\b",   ","),
-        (r"\bponto e virgula\b",         ","),
-        (r"\bdois pontos\b",             ","),
-        (r"\bponto final\b",             ""),
-        (r"\bponto\b",                   ""),
-        (r"\bv\u00edrgula\b",            ","),
-        (r"\bvirgula\b",                 ","),
-        (r"\bexclama\u00e7\u00e3o\b",    "!"),
-        (r"\bexclamacao\b",              "!"),
-        (r"\binterroga\u00e7\u00e3o\b",  "?"),
-        (r"\binterrogacao\b",            "?"),
-        (r"\babre par\u00eanteses\b",    ""),
-        (r"\bfecha par\u00eanteses\b",   ""),
-        (r"\baspas\b",                   ""),
-        (r"\btravess\u00e3o\b",          ","),
-        (r"\bperiod\b",                  ""),
-        (r"\bcomma\b",                   ","),
-        (r"\bsemicolon\b",               ","),
-        (r"\bcolon\b",                   ","),
-        (r"\bexclamation mark\b",        "!"),
-        (r"\bquestion mark\b",           "?"),
+        (r"\bponto e v\u00edrgula\b", ","),
+        (r"\bponto e virgula\b", ","),
+        (r"\bdois pontos\b", ","),
+        (r"\bponto final\b", ""),
+        (r"\bponto\b", ""),
+        (r"\bv\u00edrgula\b", ","),
+        (r"\bvirgula\b", ","),
+        (r"\bexclama\u00e7\u00e3o\b", "!"),
+        (r"\bexclamacao\b", "!"),
+        (r"\binterroga\u00e7\u00e3o\b", "?"),
+        (r"\binterrogacao\b", "?"),
+        (r"\babre par\u00eanteses\b", ""),
+        (r"\bfecha par\u00eanteses\b", ""),
+        (r"\baspas\b", ""),
+        (r"\btravess\u00e3o\b", ","),
+        (r"\bperiod\b", ""),
+        (r"\bcomma\b", ","),
+        (r"\bsemicolon\b", ","),
+        (r"\bcolon\b", ","),
+        (r"\bexclamation mark\b", "!"),
+        (r"\bquestion mark\b", "?"),
     ]
     for pattern, replacement in spelled:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
-    text = re.sub(r"[;:]",     ",",  text)
-    text = re.sub(r"\.{2,}",   ",",  text)
-    text = re.sub(r"\.",        "",   text)
+    text = re.sub(r"[;:]", ",", text)
+    text = re.sub(r"\.{2,}", ",", text)
+    text = re.sub(r"\.", "", text)
     text = re.sub(r"[()\[\]{}]", "", text)
     text = re.sub(r'[\u201c\u201d\u2018\u2019"\'`]', "", text)
     text = re.sub(r"[-\u2013\u2014]{2,}", ",", text)
@@ -922,6 +1046,7 @@ def synthesize_segments_kokoro(
 
     logs = log(f"🔊 Loading Kokoro-82M (lang=pt-br, voice={voice})…", logs)
     import warnings as _w
+
     with _w.catch_warnings():
         _w.simplefilter("ignore")
         pipeline = KPipeline(lang_code=KOKORO_LANG, repo_id="hexgrad/Kokoro-82M")
@@ -936,11 +1061,13 @@ def synthesize_segments_kokoro(
     seg_dir = job_dir / "segments"
     seg_dir.mkdir(exist_ok=True)
 
-    logs = log(f"🎤 Synthesizing {len(segments)} segments (Kokoro PT-BR, voice={voice})…", logs)
+    logs = log(
+        f"🎤 Synthesizing {len(segments)} segments (Kokoro PT-BR, voice={voice})…", logs
+    )
 
     timed_clips = []
     for i, seg in enumerate(segments):
-        out_raw  = seg_dir / f"seg_{i:04d}_raw.wav"
+        out_raw = seg_dir / f"seg_{i:04d}_raw.wav"
         out_clip = seg_dir / f"seg_{i:04d}.wav"
 
         text = _sanitize_for_tts(seg["text"].strip())
@@ -952,7 +1079,9 @@ def synthesize_segments_kokoro(
             chunks.append(audio)
 
         if not chunks:
-            logs = log(f"   ⚠️  Kokoro returned no audio for segment {i} — skipping", logs)
+            logs = log(
+                f"   ⚠️  Kokoro returned no audio for segment {i} — skipping", logs
+            )
             continue
 
         audio_np = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
@@ -961,32 +1090,53 @@ def synthesize_segments_kokoro(
         # Timing adjustment — same logic as XTTS path
         orig_dur = seg["end"] - seg["start"]
         if orig_dur > 0.1:
-            probe = subprocess.run([
-                "ffprobe", "-v", "error", "-show_entries",
-                "format=duration", "-of", "json", str(out_raw)
-            ], capture_output=True, text=True)
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
+                    str(out_raw),
+                ],
+                capture_output=True,
+                text=True,
+            )
             synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
 
             ratio = synth_dur / orig_dur
             ratio = max(0.8, min(ratio, 1.6))
 
-            subprocess.run([
-                "ffmpeg", "-y", "-i", str(out_raw),
-                "-filter:a", f"atempo={ratio:.4f}",
-                "-ar", "44100", str(out_clip)
-            ], capture_output=True)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(out_raw),
+                    "-filter:a",
+                    f"atempo={ratio:.4f}",
+                    "-ar",
+                    "44100",
+                    str(out_clip),
+                ],
+                capture_output=True,
+            )
         else:
             # Resample to 44100 for consistency with the numpy assembler
-            subprocess.run([
-                "ffmpeg", "-y", "-i", str(out_raw),
-                "-ar", "44100", str(out_clip)
-            ], capture_output=True)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(out_raw), "-ar", "44100", str(out_clip)],
+                capture_output=True,
+            )
 
-        timed_clips.append({
-            "path":  str(out_clip),
-            "start": seg["start"],
-            "end":   seg["end"],
-        })
+        timed_clips.append(
+            {
+                "path": str(out_clip),
+                "start": seg["start"],
+                "end": seg["end"],
+            }
+        )
 
         if i % 10 == 0:
             logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
@@ -1021,11 +1171,22 @@ def synthesize_segments(
     if not speaker_wav:
         # Trim to 30s for XTTS reference clip
         ref_wav = str(job_dir / "ref_30s.wav")
-        subprocess.run([
-            "ffmpeg", "-y", "-i", str(audio_orig),
-            "-t", "30", "-ar", "22050", "-ac", "1",
-            ref_wav
-        ], capture_output=True)
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(audio_orig),
+                "-t",
+                "30",
+                "-ar",
+                "22050",
+                "-ac",
+                "1",
+                ref_wav,
+            ],
+            capture_output=True,
+        )
 
     seg_dir = job_dir / "segments"
     seg_dir.mkdir(exist_ok=True)
@@ -1035,14 +1196,17 @@ def synthesize_segments(
     # Log each empty segment so the cause is visible, then skip it.
     empty = [i for i, s in enumerate(segments) if not s.get("text", "").strip()]
     if empty:
-        logs = log(f"   ⚠️  {len(empty)} empty segment(s) after translation (indices: {empty[:10]}{'…' if len(empty)>10 else ''}) — skipping", logs)
+        logs = log(
+            f"   ⚠️  {len(empty)} empty segment(s) after translation (indices: {empty[:10]}{'…' if len(empty)>10 else ''}) — skipping",
+            logs,
+        )
     segments = [s for s in segments if s.get("text", "").strip()]
 
     logs = log(f"🎤 Synthesizing {len(segments)} segments (voice clone)…", logs)
 
     timed_clips = []
     for i, seg in enumerate(segments):
-        out_raw  = seg_dir / f"seg_{i:04d}_raw.wav"
+        out_raw = seg_dir / f"seg_{i:04d}_raw.wav"
         out_clip = seg_dir / f"seg_{i:04d}.wav"
 
         text = _sanitize_for_tts(seg["text"].strip())
@@ -1062,10 +1226,20 @@ def synthesize_segments(
         # Stretching (ratio < 1.0) is always safe; we allow down to 0.8×.
         orig_dur = seg["end"] - seg["start"]
         if orig_dur > 0.1:
-            probe = subprocess.run([
-                "ffprobe", "-v", "error", "-show_entries",
-                "format=duration", "-of", "json", str(out_raw)
-            ], capture_output=True, text=True)
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
+                    str(out_raw),
+                ],
+                capture_output=True,
+                text=True,
+            )
             synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
 
             ratio = synth_dur / orig_dur  # >1 = too long, need to speed up
@@ -1075,19 +1249,30 @@ def synthesize_segments(
             ratio = max(0.8, min(ratio, 1.6))
 
             atempo = f"atempo={ratio:.4f}"
-            subprocess.run([
-                "ffmpeg", "-y", "-i", str(out_raw),
-                "-filter:a", atempo,
-                "-ar", "44100", str(out_clip)
-            ], capture_output=True)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(out_raw),
+                    "-filter:a",
+                    atempo,
+                    "-ar",
+                    "44100",
+                    str(out_clip),
+                ],
+                capture_output=True,
+            )
         else:
             shutil.copy(str(out_raw), str(out_clip))
 
-        timed_clips.append({
-            "path":  str(out_clip),
-            "start": seg["start"],
-            "end":   seg["end"],
-        })
+        timed_clips.append(
+            {
+                "path": str(out_clip),
+                "start": seg["start"],
+                "end": seg["end"],
+            }
+        )
 
         if i % 10 == 0:
             logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
@@ -1119,7 +1304,7 @@ def assemble_dubbed_video(
         return result
 
     # Audio assembly: place each segment at its timestamp using sox.
-    # 
+    #
     # All previous amix-based approaches divided amplitude by input count,
     # producing audio 20-34 dB below full scale regardless of weights or
     # normalization passes applied afterward.
@@ -1154,11 +1339,17 @@ def assemble_dubbed_video(
 
             # Convert raw bytes → float32 [-1, 1]
             if sampwidth == 2:
-                samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                samples = (
+                    np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                )
             elif sampwidth == 4:
-                samples = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+                samples = (
+                    np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+                )
             else:
-                samples = np.frombuffer(raw, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
+                samples = (
+                    np.frombuffer(raw, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
+                )
 
             # Mix down to mono if stereo
             if n_ch == 2:
@@ -1171,11 +1362,11 @@ def assemble_dubbed_video(
                 samples = np.interp(
                     np.linspace(0, len(samples) - 1, new_len),
                     np.arange(len(samples)),
-                    samples
+                    samples,
                 ).astype(np.float32)
 
             end = min(offset + len(samples), total_samples)
-            buffer[offset:end] += samples[:end - offset]
+            buffer[offset:end] += samples[: end - offset]
 
         except Exception as e:
             logs = log(f"   ⚠️  Could not read clip {clip['path']}: {e}", logs)
@@ -1185,7 +1376,9 @@ def assemble_dubbed_video(
     if peak > 0.001:
         buffer = buffer * (0.891 / peak)  # 0.891 ≈ -1 dBFS
     else:
-        logs = log("   ⚠️  Audio buffer is nearly silent — synthesis may have failed", logs)
+        logs = log(
+            "   ⚠️  Audio buffer is nearly silent — synthesis may have failed", logs
+        )
 
     # Convert to stereo int16 WAV
     stereo = np.stack([buffer, buffer], axis=1)
@@ -1204,16 +1397,29 @@ def assemble_dubbed_video(
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
     output_path = OUTPUT_DIR / f"{safe_title}_PT-BR.mp4"
 
-    run_ffmpeg([
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(mixed_audio),
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-shortest",
-        str(output_path)
-    ], "final mux")
+    run_ffmpeg(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(mixed_audio),
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-shortest",
+            str(output_path),
+        ],
+        "final mux",
+    )
 
     # Verify the file actually landed on disk
     if not output_path.exists() or output_path.stat().st_size < 1024:
@@ -1231,19 +1437,22 @@ def assemble_dubbed_video(
 # ── SRT subtitle generation ───────────────────────────────────────────────────
 
 # Reading-speed constants (Netflix/BBC standard for accessible subtitles)
-SRT_CHARS_PER_SEC = 17.0   # comfortable reading pace
-SRT_MIN_DURATION  = 1.2    # minimum cue display time (seconds)
-SRT_MAX_CHARS     = 80     # maximum chars per cue before refusing to merge
-SRT_MERGE_GAP     = 0.5    # merge adjacent segments separated by ≤ this gap (seconds)
-SRT_LINE_WIDTH    = 42     # wrap to 2 lines when text exceeds this character count
+SRT_CHARS_PER_SEC = 17.0  # comfortable reading pace
+SRT_MIN_DURATION = 1.2  # minimum cue display time (seconds)
+SRT_MAX_CHARS = 80  # maximum chars per cue before refusing to merge
+SRT_MERGE_GAP = 0.5  # merge adjacent segments separated by ≤ this gap (seconds)
+SRT_LINE_WIDTH = 42  # wrap to 2 lines when text exceeds this character count
 
 
 def _srt_timestamp(seconds: float) -> str:
     """Convert float seconds to SRT timestamp: HH:MM:SS,mmm."""
-    ms  = int(round(seconds * 1000))
-    hh  = ms // 3_600_000; ms %= 3_600_000
-    mm  = ms //    60_000; ms %=    60_000
-    ss  = ms //     1_000; ms %=     1_000
+    ms = int(round(seconds * 1000))
+    hh = ms // 3_600_000
+    ms %= 3_600_000
+    mm = ms // 60_000
+    ms %= 60_000
+    ss = ms // 1_000
+    ms %= 1_000
     return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
 
 
@@ -1255,15 +1464,15 @@ def _wrap_subtitle_line(text: str) -> str:
     if len(text) <= SRT_LINE_WIDTH:
         return text
     words = text.split()
-    mid        = len(text) // 2
-    pos        = 0
+    mid = len(text) // 2
+    pos = 0
     best_split = max(1, len(words) // 2)
-    best_dist  = float("inf")
+    best_dist = float("inf")
     for i in range(1, len(words)):
-        pos  += len(words[i - 1]) + 1
-        dist  = abs(pos - mid)
+        pos += len(words[i - 1]) + 1
+        dist = abs(pos - mid)
         if dist < best_dist:
-            best_dist  = dist
+            best_dist = dist
             best_split = i
     return " ".join(words[:best_split]) + "\n" + " ".join(words[best_split:])
 
@@ -1292,18 +1501,18 @@ def generate_srt(segments: list, output_path: Path) -> int:
             continue
         start, end = seg["start"], seg["end"]
         if cues:
-            prev     = cues[-1]
-            gap      = start - prev["end"]
+            prev = cues[-1]
+            gap = start - prev["end"]
             combined = prev["text"] + " " + text
             if gap <= SRT_MERGE_GAP and len(combined) <= SRT_MAX_CHARS:
                 prev["text"] = combined
-                prev["end"]  = end
+                prev["end"] = end
                 continue
         cues.append({"start": start, "end": end, "text": text})
 
     # ── Pass 2: enforce minimum reading time ──────────────────────────────────
     for i, cue in enumerate(cues):
-        min_dur     = max(SRT_MIN_DURATION, len(cue["text"]) / SRT_CHARS_PER_SEC)
+        min_dur = max(SRT_MIN_DURATION, len(cue["text"]) / SRT_CHARS_PER_SEC)
         natural_end = cue["start"] + min_dur
         if cue["end"] < natural_end:
             ceiling = cues[i + 1]["start"] - 0.05 if i + 1 < len(cues) else natural_end
@@ -1336,7 +1545,7 @@ def generate_srt_for_project(project_name: str) -> tuple[str | None, str]:
     if not proj:
         return None, "❌ No project name provided."
 
-    d               = project_dir(proj)
+    d = project_dir(proj)
     translated_file = d / "translated.json"
     if not translated_file.exists():
         return None, (
@@ -1344,7 +1553,7 @@ def generate_srt_for_project(project_name: str) -> tuple[str | None, str]:
             "Run the translate stage first."
         )
 
-    title     = proj
+    title = proj
     meta_file = d / "meta.json"
     if meta_file.exists():
         try:
@@ -1352,10 +1561,10 @@ def generate_srt_for_project(project_name: str) -> tuple[str | None, str]:
         except Exception:
             pass
 
-    segments   = json.loads(translated_file.read_text(encoding="utf-8"))
+    segments = json.loads(translated_file.read_text(encoding="utf-8"))
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]
 
-    out_dir  = d / "outputs"
+    out_dir = d / "outputs"
     out_dir.mkdir(exist_ok=True)
     srt_path = out_dir / f"{safe_title}_PT-BR.srt"
 
@@ -1368,6 +1577,7 @@ def generate_srt_for_project(project_name: str) -> tuple[str | None, str]:
 
 
 # ── Cleanup helpers ───────────────────────────────────────────────────────────
+
 
 def cleanup_stale_jobs(logs: list) -> list:
     """
@@ -1404,14 +1614,16 @@ def cleanup_stale_jobs(logs: list) -> list:
             pass  # already gone or permission issue — skip silently
 
     if cleaned:
-        logs = log(f"🧹 Cleaned {cleaned} stale job folder(s) (>{JOB_MAX_AGE_H}h old)", logs)
+        logs = log(
+            f"🧹 Cleaned {cleaned} stale job folder(s) (>{JOB_MAX_AGE_H}h old)", logs
+        )
     return logs
-
 
 
 # ── Project persistence ───────────────────────────────────────────────────────
 
 STAGES = ["download", "transcribe", "translate", "synthesize", "assemble"]
+
 
 def project_dir(name: str) -> Path:
     safe = "".join(c for c in name.strip() if c.isalnum() or c in " _-")[:60].strip()
@@ -1426,7 +1638,8 @@ def list_projects() -> list[str]:
     if not PROJECTS_DIR.exists():
         return []
     return sorted(
-        d.name for d in PROJECTS_DIR.iterdir()
+        d.name
+        for d in PROJECTS_DIR.iterdir()
         if d.is_dir() and not d.name.startswith(".")
     )
 
@@ -1435,11 +1648,13 @@ def project_status(name: str) -> dict:
     """Return which stage outputs exist for a project."""
     d = project_dir(name)
     return {
-        "download":   (d / "video.mp4").exists() and (d / "audio_orig.wav").exists(),
+        "download": (d / "video.mp4").exists() and (d / "audio_orig.wav").exists(),
         "transcribe": (d / "segments.json").exists(),
-        "translate":  (d / "translated.json").exists(),
+        "translate": (d / "translated.json").exists(),
         "synthesize": (d / "timed_clips.json").exists(),
-        "assemble":   any((d / "outputs").glob("*.mp4")) if (d / "outputs").exists() else False,
+        "assemble": (
+            any((d / "outputs").glob("*.mp4")) if (d / "outputs").exists() else False
+        ),
     }
 
 
@@ -1496,6 +1711,7 @@ def load_project_stage(name: str, stage: str) -> Any:
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
+
 def run_pipeline(
     url: str,
     speaker_wav_path: str | None,
@@ -1515,11 +1731,11 @@ def run_pipeline(
 
     # Stage order for resume logic
     stage_order = {s: i for i, s in enumerate(STAGES)}
-    resume_idx  = stage_order.get(resume_from, 0)
+    resume_idx = stage_order.get(resume_from, 0)
 
     # job_dir: temp workspace for files generated this run
     # (segment WAVs etc). Saved stages are persisted to pdir.
-    job_id  = str(int(time.time()))
+    job_id = str(int(time.time()))
     job_dir = WORK_DIR / job_id
     job_dir.mkdir(exist_ok=True)
 
@@ -1546,11 +1762,15 @@ def run_pipeline(
             video_path, audio_path, title, duration, logs = download_video(
                 url, job_dir, logs, browser=browser, cookies_file=cookies_file
             )
-            save_project_stage(proj, "download", (video_path, audio_path, title, duration))
+            save_project_stage(
+                proj, "download", (video_path, audio_path, title, duration)
+            )
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping download (loaded from project)", logs)
-            video_path, audio_path, title, duration = load_project_stage(proj, "download")
+            video_path, audio_path, title, duration = load_project_stage(
+                proj, "download"
+            )
             logs = log(f"   📹 {title} ({duration}s)", logs)
             yield None, "\n".join(logs)
 
@@ -1569,9 +1789,13 @@ def run_pipeline(
         # ── Translate ─────────────────────────────────────────────────────────
         if resume_idx <= stage_order["translate"]:
             progress(0.4, desc="Translating…")
-            translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key)
+            translated, logs = translate_segments(
+                cast(list, segments), logs, openrouter_key=openrouter_key
+            )
             progress(0.5, desc="Checking timing budget…")
-            translated, logs = apply_timing_budget(translated, logs, openrouter_key=openrouter_key)
+            translated, logs = apply_timing_budget(
+                translated, logs, openrouter_key=openrouter_key
+            )
             save_project_stage(proj, "translate", translated)
             yield None, "\n".join(logs)
         else:
@@ -1584,14 +1808,23 @@ def run_pipeline(
         if resume_idx <= stage_order["synthesize"]:
             progress(0.55, desc="Synthesizing voice…")
             utterances = _group_for_synthesis(translated)
-            logs = log(f"   Grouped {len(translated)} segments → {len(utterances)} utterances for sentence-level synthesis", logs)
+            logs = log(
+                f"   Grouped {len(translated)} segments → {len(utterances)} utterances for sentence-level synthesis",
+                logs,
+            )
             if tts_engine == "Kokoro (fast, PT-BR native)":
                 timed_clips, logs = synthesize_segments_kokoro(
-                    utterances, job_dir, logs, voice=kokoro_voice,
+                    utterances,
+                    job_dir,
+                    logs,
+                    voice=kokoro_voice,
                 )
             else:
                 timed_clips, logs = synthesize_segments(
-                    utterances, audio_path, job_dir, logs,
+                    utterances,
+                    audio_path,
+                    job_dir,
+                    logs,
                     speaker_wav=speaker_wav_path,
                 )
             save_project_stage(proj, "synthesize", timed_clips)
@@ -1605,7 +1838,12 @@ def run_pipeline(
         # ── Assemble ──────────────────────────────────────────────────────────
         progress(0.85, desc="Assembling video…")
         output_path, logs = assemble_dubbed_video(
-            video_path, timed_clips, float(duration or 0), job_dir, title or "video", logs
+            video_path,
+            timed_clips,
+            float(duration or 0),
+            job_dir,
+            title or "video",
+            logs,
         )
         save_project_stage(proj, "assemble", output_path)
 
@@ -1621,6 +1859,7 @@ def run_pipeline(
 
     except Exception as e:
         import traceback
+
         logs = log(f"❌ Error: {e}\n{traceback.format_exc()}", logs)
         yield None, "\n".join(logs)
     finally:
@@ -1838,6 +2077,7 @@ video { border-radius: 12px !important; }
 .gr-accordion { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 12px !important; }
 """
 
+
 def build_ui():
     with gr.Blocks(title="Dubweave — PT-BR") as demo:
 
@@ -1877,25 +2117,36 @@ def build_ui():
                         scale=2,
                     )
                     resume_from_input = gr.Dropdown(
-                        choices=["download", "transcribe", "translate", "synthesize", "assemble"],
+                        choices=[
+                            "download",
+                            "transcribe",
+                            "translate",
+                            "synthesize",
+                            "assemble",
+                        ],
                         value="download",
                         label="Resume from stage",
                         scale=1,
                     )
-                project_status_html = gr.HTML("<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>Enter a project name to see its status.</div>")
+                project_status_html = gr.HTML(
+                    "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>Enter a project name to see its status.</div>"
+                )
 
         def refresh_status(name):
             name = name.strip()
             if not name:
                 return "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;'>Enter a project name to see its status.</div>"
             status = project_status(name)
-            icons = {True: "<span style='color:#00e5a0'>✓</span>", False: "<span style='color:#3a3a58'>○</span>"}
-            parts = " &nbsp;·&nbsp; ".join(
-                f"{icons[v]} {s}" for s, v in status.items()
-            )
+            icons = {
+                True: "<span style='color:#00e5a0'>✓</span>",
+                False: "<span style='color:#3a3a58'>○</span>",
+            }
+            parts = " &nbsp;·&nbsp; ".join(f"{icons[v]} {s}" for s, v in status.items())
             return f"<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>{parts}</div>"
 
-        project_name_input.change(fn=refresh_status, inputs=project_name_input, outputs=project_status_html)
+        project_name_input.change(
+            fn=refresh_status, inputs=project_name_input, outputs=project_status_html
+        )
 
         gr.HTML('<div style="height:8px"></div>')
         gr.HTML('<div class="panel-label">02 · Input</div>')
@@ -2051,7 +2302,7 @@ def build_ui():
             srt_btn = gr.Button("📝  Generate / Download SRT", variant="secondary")
         with gr.Row():
             srt_file_output = gr.File(label="SRT subtitle file")
-            srt_status      = gr.Textbox(label="Status", lines=1, interactive=False)
+            srt_status = gr.Textbox(label="Status", lines=1, interactive=False)
 
         def _run_generate_srt(project_name):
             path, msg = generate_srt_for_project(project_name)
@@ -2073,7 +2324,18 @@ def build_ui():
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=[url_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, openrouter_key_input, project_name_input, resume_from_input, tts_engine_input, kokoro_voice_input],
+            inputs=[
+                url_input,
+                speaker_input,
+                whisper_model_input,
+                browser_input,
+                cookies_file_input,
+                openrouter_key_input,
+                project_name_input,
+                resume_from_input,
+                tts_engine_input,
+                kokoro_voice_input,
+            ],
             outputs=[video_output, log_output],
         )
 
