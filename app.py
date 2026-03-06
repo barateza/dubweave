@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Generator, Any, cast
+from typing import Any, Generator, cast
 
 import warnings
 import gradio as gr
@@ -22,6 +22,10 @@ import gradio as gr
 # These are known, safe, third-party model files — not a security concern here.
 warnings.filterwarnings("ignore", category=FutureWarning, module="TTS")
 warnings.filterwarnings("ignore", message=".*weights_only.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*resume_download.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*weight_norm.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*dropout option.*", category=UserWarning)
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 # ── Lazy imports (installed at runtime) ──────────────────────────────────────
 def lazy_import():
@@ -120,7 +124,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     else:
         logs = log("   ⚠️  deno not found — some YouTube formats may be missing (run setup.bat)", logs)
 
-    BASE_OPTS = {
+    BASE_OPTS: dict[str, Any] = {
         "outtmpl": str(job_dir / "%(id)s_%(format_id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": False,
@@ -177,9 +181,9 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
 
     for fmt in VIDEO_FORMATS:
         try:
-            opts = {**BASE_OPTS, "format": fmt,
-                    "outtmpl": str(job_dir / f"video_raw.%(ext)s")}
-            with yt.YoutubeDL(cast(Any, opts)) as ydl:
+            opts = cast(Any, {**BASE_OPTS, "format": fmt,
+                              "outtmpl": str(job_dir / f"video_raw.%(ext)s")})
+            with yt.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
             candidates = list(job_dir.glob("video_raw.*"))
             if candidates:
@@ -218,7 +222,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
         raw_audio_file = None
         for fmt in AUDIO_FORMATS:
             try:
-                opts = {
+                opts = cast(Any, {
                     **BASE_OPTS,
                     "format": fmt,
                     "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
@@ -227,8 +231,8 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
                         "preferredcodec": "wav",
                         "preferredquality": "0",
                     }],
-                }
-                with yt.YoutubeDL(cast(Any, opts)) as ydl:
+                })
+                with yt.YoutubeDL(opts) as ydl:
                     ydl.extract_info(url, download=True)
                 candidates = list(job_dir.glob("audio_raw.*"))
                 if candidates:
@@ -253,7 +257,7 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     return video_path, audio_path, title, duration, logs
 
 
-def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MODEL) -> tuple[list, list]:
+def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MODEL):
     """Transcribe audio with Whisper, return segments with timestamps."""
     import whisper
     logs = log(f"🎙️ Transcribing with Whisper ({model_name})…", logs)
@@ -266,7 +270,7 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
         verbose=False,
     )
 
-    segments = cast(list, result["segments"])
+    segments = result["segments"]
     logs = log(f"✅ Transcribed {len(segments)} segments", logs)
     return segments, logs
 
@@ -334,14 +338,14 @@ def _ptpt_to_ptbr(text: str) -> str:
     import re
     for pattern, replacement in _PTPT_TO_PTBR:
         if callable(replacement):
-            text = re.sub(pattern, cast(Any, replacement), text, flags=re.IGNORECASE)
+            text = str(re.sub(pattern, replacement, text, flags=re.IGNORECASE))
         else:
             # Preserve capitalisation of the first letter
-            def _replace(m: re.Match[str], repl: str = replacement) -> str:
+            def _replace(m: re.Match[str], repl: str = cast(str, replacement)) -> str:
                 if m.group(0)[0].isupper():
                     return repl[0].upper() + repl[1:]
                 return repl
-            text = re.sub(pattern, _replace, text, flags=re.IGNORECASE)
+            text = str(re.sub(pattern, _replace, text, flags=re.IGNORECASE))
     return text
 
 
@@ -380,7 +384,7 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
     batch_size = 32
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
-        outputs = cast(list[dict[str, str]], pipe(batch, batch_size=min(8, len(batch))))
+        outputs = cast(list, pipe(batch, batch_size=min(8, len(batch))))
         results.extend(o["translation_text"] for o in outputs)
 
     # Post-process: convert remaining PT-PT markers to PT-BR
@@ -901,12 +905,15 @@ def synthesize_segments_kokoro(
     """
     import numpy as np
     import soundfile as sf
-    from kokoro import KPipeline  # type: ignore
+    from kokoro import KPipeline
 
     KOKORO_SR = 24000  # Kokoro always outputs at 24kHz
 
     logs = log(f"🔊 Loading Kokoro-82M (lang=pt-br, voice={voice})…", logs)
-    pipeline = KPipeline(lang_code=KOKORO_LANG)
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        pipeline = KPipeline(lang_code=KOKORO_LANG, repo_id="hexgrad/Kokoro-82M")
     logs = log("   Kokoro ready", logs)
 
     # Sanitize and filter empty segments
@@ -1326,19 +1333,15 @@ def save_project_stage(name: str, stage: str, data):
 def load_project_stage(name: str, stage: str) -> Any:
     """Load a previously saved stage output from project directory."""
     d = project_dir(name)
-    try:
-        if stage == "download":
-            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-            return d / "video.mp4", d / "audio_orig.wav", meta["title"], meta["duration"]
-        elif stage == "transcribe":
-            return json.loads((d / "segments.json").read_text(encoding="utf-8"))
-        elif stage == "translate":
-            return json.loads((d / "translated.json").read_text(encoding="utf-8"))
-        elif stage == "synthesize":
-            return json.loads((d / "timed_clips.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    return None
+    if stage == "download":
+        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        return d / "video.mp4", d / "audio_orig.wav", meta["title"], meta["duration"]
+    elif stage == "transcribe":
+        return json.loads((d / "segments.json").read_text(encoding="utf-8"))
+    elif stage == "translate":
+        return json.loads((d / "translated.json").read_text(encoding="utf-8"))
+    elif stage == "synthesize":
+        return json.loads((d / "timed_clips.json").read_text(encoding="utf-8"))
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
@@ -1397,10 +1400,7 @@ def run_pipeline(
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping download (loaded from project)", logs)
-            res = load_project_stage(proj, "download")
-            if not res:
-                raise RuntimeError(f"Project '{proj}' download stage not found — cannot resume.")
-            video_path, audio_path, title, duration = res
+            video_path, audio_path, title, duration = load_project_stage(proj, "download")
             logs = log(f"   📹 {title} ({duration}s)", logs)
             yield None, "\n".join(logs)
 
@@ -1413,8 +1413,6 @@ def run_pipeline(
         else:
             logs = log("⏭️  Skipping transcription (loaded from project)", logs)
             segments = cast(list, load_project_stage(proj, "transcribe"))
-            if segments is None:
-                raise RuntimeError(f"Project '{proj}' transcription stage not found — cannot resume.")
             logs = log(f"   📝 {len(segments)} segments loaded", logs)
             yield None, "\n".join(logs)
 
@@ -1429,8 +1427,6 @@ def run_pipeline(
         else:
             logs = log("⏭️  Skipping translation (loaded from project)", logs)
             translated = cast(list, load_project_stage(proj, "translate"))
-            if translated is None:
-                raise RuntimeError(f"Project '{proj}' translation stage not found — cannot resume.")
             logs = log(f"   🌐 {len(translated)} translated segments loaded", logs)
             yield None, "\n".join(logs)
 
@@ -1450,9 +1446,7 @@ def run_pipeline(
             yield None, "\n".join(logs)
         else:
             logs = log("⏭️  Skipping synthesis (loaded from project)", logs)
-            timed_clips = cast(list, load_project_stage(proj, "synthesize"))
-            if timed_clips is None:
-                raise RuntimeError(f"Project '{proj}' synthesis stage not found — cannot resume.")
+            timed_clips = load_project_stage(proj, "synthesize")
             logs = log(f"   🔊 {len(timed_clips)} audio clips loaded", logs)
             yield None, "\n".join(logs)
 
