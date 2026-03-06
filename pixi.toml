@@ -3,21 +3,28 @@ name = "dubweave"
 version = "0.1.0"
 description = "YouTube -> pt-br dubbing pipeline"
 authors = ["Gilson Siqueira"]
-channels = ["conda-forge", "pytorch", "nvidia"]
+channels = ["pytorch", "nvidia", "conda-forge"]
 platforms = ["win-64"]
+
+[system-requirements]
+cuda = "12.4"
 
 [dependencies]
 python = ">=3.10,<3.12"
 ffmpeg = "*"
+numpy = ">=1.24,<2.0"          # gruut requires <2.0
+networkx = ">=2.5,<3.0"        # gruut requires <3.0
+
 pytorch = { version = ">=2.1", channel = "pytorch" }
 torchvision = { version = "*", channel = "pytorch" }
 torchaudio = { version = "*", channel = "pytorch" }
-pytorch-cuda = { version = "12.1.*", channel = "pytorch" }
+pytorch-cuda = { version = "12.4.*", channel = "pytorch" }
 
 [pypi-dependencies]
 yt-dlp = "*"
 openai-whisper = "*"
-TTS = "*"
+TTS = "==0.22.0"
+transformers = ">=4.33,<4.38"  # BeamSearchScorer removed in 4.38; TTS 0.22.0 requires the old API
 gradio = "*"
 argostranslate = "*"
 
