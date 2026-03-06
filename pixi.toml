@@ -30,10 +30,11 @@ gradio = "*"
 sentencepiece = "*"           # required by NLLB-200 tokenizer
 triton-windows = "*"           # Windows port of Triton — GPU kernels for Whisper DTW/median ops
 kokoro = "*"                   # Kokoro-82M TTS — 82M params, native PT-BR, Apache 2.0
+hf_xet = "*"                   # Faster HF downloads
 soundfile = "*"                # WAV I/O for Kokoro numpy output
 
 [tasks]
-download-nllb   = "python -W ignore::FutureWarning-c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
+download-nllb   = "python -W ignore::FutureWarning -c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
 download-xtts  = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2'); print('XTTS v2 ready.')\""
 download-kokoro = "python -W ignore -c \"from kokoro import KPipeline; KPipeline(lang_code='p', repo_id='hexgrad/Kokoro-82M'); print('Kokoro PT-BR ready.')\""
 fetch-ejs      = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
