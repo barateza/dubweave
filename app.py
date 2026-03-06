@@ -1084,7 +1084,8 @@ def _sanitize_for_tts(text: str) -> str:
 
     text = re.sub(r"[;:]", ",", text)
     text = re.sub(r"\.{2,}", ",", text)
-    text = re.sub(r"\.", "", text)
+    text = re.sub(r"\.(?=\s)", ",", text)  # interior periods → comma (soft pause, prevents run-ons)
+    text = re.sub(r"\.", "", text)         # terminal/remaining periods → nothing (avoids "ponto")
     text = re.sub(r"[()\[\]{}]", "", text)
     text = re.sub(r'[\u201c\u201d\u2018\u2019"\'`]', "", text)
     text = re.sub(r"[-\u2013\u2014]{2,}", ",", text)
