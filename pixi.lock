@@ -265,6 +265,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a0/38/c4381497fde987c72fc58d9b534dfd9e254e34d402e06be232f40e1baf66/trainer-0.0.36-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/85/f6/c5065913119c41ecad148c34e3a861f719e16b89a522287213698da911fc/transformers-4.37.2-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/49/b8/2ce283452b0b9e0d239c7833626750befe94d5bbed18fb9449dcc5fa494e/triton_windows-3.6.0.post25-cp311-cp311-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/4e/23/50bbe8cb32488680913a63fb1a273d64f4a765af4779b219814ffb8624fe/TTS-0.22.0.tar.gz
       - pypi: https://files.pythonhosted.org/packages/91/88/b55b3117287a8540b76dbdd87733808d4d01c8067a3b339408c250bb3600/typeguard-4.5.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/4a/91/48db081e7a63bb37284f9fbcefda7c44c277b18b0e13fbc36ea2335b71e6/typer-0.24.1-py3-none-any.whl
@@ -3798,6 +3799,26 @@ packages:
   - av==9.2.0 ; extra == 'video'
   - pillow>=10.0.1,<=15.0 ; extra == 'vision'
   requires_python: '>=3.8.0'
+- pypi: https://files.pythonhosted.org/packages/49/b8/2ce283452b0b9e0d239c7833626750befe94d5bbed18fb9449dcc5fa494e/triton_windows-3.6.0.post25-cp311-cp311-win_amd64.whl
+  name: triton-windows
+  version: 3.6.0.post25
+  sha256: 5dabf103499825379c9ba877da46a4c34296466a628b539249482ab6d970708e
+  requires_dist:
+  - importlib-metadata ; python_full_version < '3.10'
+  - cmake>=3.20,<4.0 ; extra == 'build'
+  - lit ; extra == 'build'
+  - autopep8 ; extra == 'tests'
+  - isort ; extra == 'tests'
+  - numpy ; extra == 'tests'
+  - pytest ; extra == 'tests'
+  - pytest-forked ; extra == 'tests'
+  - pytest-xdist ; extra == 'tests'
+  - scipy>=1.7.1 ; extra == 'tests'
+  - llnl-hatchet ; extra == 'tests'
+  - matplotlib ; extra == 'tutorials'
+  - pandas ; extra == 'tutorials'
+  - tabulate ; extra == 'tutorials'
+  requires_python: '>=3.10,<3.15'
 - pypi: https://files.pythonhosted.org/packages/4e/23/50bbe8cb32488680913a63fb1a273d64f4a765af4779b219814ffb8624fe/TTS-0.22.0.tar.gz
   name: tts
   version: 0.22.0
