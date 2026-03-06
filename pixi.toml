@@ -31,7 +31,7 @@ sentencepiece = "*"           # required by NLLB-200 tokenizer
 triton-windows = "*"           # Windows port of Triton — GPU kernels for Whisper DTW/median ops
 
 [tasks]
-download-nllb   = "python -c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
+download-nllb   = "python -W ignore::FutureWarning -c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
 download-xtts  = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2'); print('XTTS v2 ready.')\""
 fetch-ejs      = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
 setup          = { depends-on = ["download-nllb", "download-xtts", "fetch-ejs"] }
