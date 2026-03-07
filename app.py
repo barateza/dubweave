@@ -2559,11 +2559,32 @@ CSS = """
     --accent:  #00e5a0;
     --accent2: #7c6dff;
     --text:    #e8e8f0;
-    --muted:   #6b6b8a;
+    --muted:   #b0b0cc;
     --danger:  #ff4f6e;
 }
 
 * { box-sizing: border-box; }
+
+/* Skip link */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: #0a0a0f;
+    color: #00e5a0;
+    padding: 8px 16px;
+    z-index: 9999;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.88rem;
+    border: 1px solid #00e5a0;
+    border-radius: 0 0 8px 0;
+    text-decoration: none;
+}
+.skip-link:focus {
+    top: 0;
+    outline: 2px solid #00e5a0;
+    outline-offset: 2px;
+}
 
 body, .gradio-container {
     background: var(--bg) !important;
@@ -2615,7 +2636,7 @@ body, .gradio-container {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-family: 'JetBrains Mono', monospace;
     color: var(--muted);
     letter-spacing: 0.04em;
@@ -2648,7 +2669,7 @@ body, .gradio-container {
     background: linear-gradient(90deg, transparent, rgba(0,229,160,0.3), transparent);
 }
 .panel-label {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-family: 'JetBrains Mono', monospace;
     color: var(--accent);
     letter-spacing: 0.12em;
@@ -2678,8 +2699,9 @@ input[type="text"], textarea, .gr-textbox input, .gr-textbox textarea {
 }
 input[type="text"]:focus, textarea:focus {
     border-color: var(--accent) !important;
-    outline: none !important;
-    box-shadow: 0 0 0 3px rgba(0,229,160,0.08) !important;
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px !important;
+    box-shadow: 0 0 0 4px rgba(0,229,160,0.20) !important;
 }
 
 /* Labels */
@@ -2718,6 +2740,7 @@ label, .gr-form label, .block span {
 }
 #run-btn:hover { opacity: 0.92 !important; transform: translateY(-1px) !important; }
 #run-btn:active { transform: translateY(0) !important; }
+#run-btn:focus-visible { outline: 2px solid #00e5a0 !important; outline-offset: 3px !important; }
 
 /* Log output */
 #log-box textarea {
@@ -2741,7 +2764,7 @@ video { border-radius: 12px !important; }
     border: 1px solid rgba(124,109,255,0.25);
     border-radius: 20px;
     padding: 4px 12px;
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-family: 'JetBrains Mono', monospace;
     color: #a99dff;
     margin: 4px;
@@ -2755,6 +2778,25 @@ video { border-radius: 12px !important; }
 
 /* Accordion */
 .gr-accordion { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 12px !important; }
+
+/* High Contrast Mode: restore H1 visibility when gradient clip is suppressed */
+@media (forced-colors: active) {
+    #header h1 {
+        -webkit-text-fill-color: revert;
+        color: ButtonText;
+        background: none;
+    }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
 """
 
 
@@ -2765,6 +2807,7 @@ def build_ui():
     with gr.Blocks(title="Dubweave — PT-BR") as demo:
 
         gr.HTML("""
+        <a href="#main-content" class="skip-link">Skip to main content</a>
         <div id="header">
           <h1>DUBWEAVE</h1>
           <p>youtube → dubbing → português brasileiro</p>
@@ -2802,7 +2845,7 @@ def build_ui():
                 f"""</div>"""
             )
 
-        with gr.Row():
+        with gr.Row(elem_id="main-content"):
             with gr.Column(scale=3):
                 gr.HTML('<div class="panel-label">01 · Project</div>')
                 with gr.Row():
@@ -2825,20 +2868,20 @@ def build_ui():
                         scale=1,
                     )
                 project_status_html = gr.HTML(
-                    "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>Enter a project name to see its status.</div>"
+                    "<div aria-live='polite' aria-atomic='true'><div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#9494b2;margin-top:6px;'>Enter a project name to see its status.</div></div>"
                 )
 
         def refresh_status(name):
             name = name.strip()
             if not name:
-                return "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;'>Enter a project name to see its status.</div>"
+                return "<div aria-live='polite' aria-atomic='true'><div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#9494b2;'>Enter a project name to see its status.</div></div>"
             status = project_status(name)
             icons = {
                 True: "<span style='color:#00e5a0'>✓</span>",
-                False: "<span style='color:#3a3a58'>○</span>",
+                False: "<span style='color:#9494b2'>·</span>",
             }
             parts = " &nbsp;·&nbsp; ".join(f"{icons[v]} {s}" for s, v in status.items())
-            return f"<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#6b6b8a;margin-top:6px;'>{parts}</div>"
+            return f"<div aria-live='polite' aria-atomic='true'><div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#9494b2;margin-top:6px;'>{parts}</div></div>"
 
         project_name_input.change(
             fn=refresh_status, inputs=project_name_input, outputs=project_status_html
@@ -2858,7 +2901,7 @@ def build_ui():
 
         with gr.Accordion("🎙️ Custom Voice Reference (optional)", open=False):
             gr.HTML("""
-            <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 12px;">
+            <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 12px;">
             Upload a WAV/MP3 of the voice you want to clone (10–30s ideal).<br>
             Leave empty to auto-clone from the original video's speaker.
             </p>
@@ -2873,7 +2916,7 @@ def build_ui():
 
         with gr.Accordion("⚙️ Transcription Model", open=False):
             gr.HTML("""
-            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 16px;line-height:1.7;">
               <strong style="color:#e8e8f0;">large-v3-turbo</strong> — Recommended for most videos.<br>
               Distilled from large-v3: ~8× faster, near-identical accuracy on clean audio.<br>
               Uses ~3 GB VRAM. Best choice for YouTube videos with clear speech.<br>
@@ -2894,7 +2937,7 @@ def build_ui():
 
         with gr.Accordion("🍪 YouTube Account (optional)", open=False):
             gr.HTML("""
-            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 16px;line-height:1.7;">
               Logged-in cookies give yt-dlp access to YouTube's most reliable clients,<br>
               avoiding PO token errors and JS challenge failures.<br>
               <br>
@@ -2935,7 +2978,7 @@ def build_ui():
                     "<code>GOOGLE_TTS_API_KEY</code> in <code>.env</code>."
                 )
             gr.HTML(f"""
-            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 16px;line-height:1.7;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 16px;line-height:1.7;">
               <strong style="color:#00e5a0;">Kokoro</strong> — recommended. 82M params, loads in &lt;2s, native PT-BR voices,
               no voice cloning. Extremely fast on RTX 4070 Super.<br>
               Voices: <code>pf_dora</code> (female) · <code>pm_alex</code> (male) · <code>pm_santa</code> (male)<br>
@@ -3040,7 +3083,7 @@ def build_ui():
         gr.HTML('<div style="height:12px"></div>')
         gr.HTML('<div class="panel-label">05 · Subtitles</div>')
         gr.HTML("""
-        <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#6b6b8a;margin:0 0 12px;line-height:1.7;">
+        <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 12px;line-height:1.7;">
           Generates an SRT from <code>translated.json</code> — no re-synthesis needed.<br>
           Short fragments are merged, minimum reading time is enforced (17 chars/sec),
           and long lines are wrapped to 2 lines for readability.

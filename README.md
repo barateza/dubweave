@@ -162,6 +162,20 @@ Three-tier cookie strategy: **cookies.txt** (Netscape format, highest priority) 
 
 ---
 
+## Accessibility
+
+The Dubweave web UI meets **WCAG 2.1 Level AA** accessibility standards with enhanced contrast exceeding **AAA (7:1 ratio)**. All users, including those with disabilities, can:
+
+- **Keyboard-only**: Tab through the entire UI, focus is always visible, no keyboard traps
+- **Screen reader** (NVDA, JAWS, VoiceOver): All buttons, labels, and status updates are announced; skip link bypasses decorative header
+- **High Contrast Mode** (Windows): Title and all text remain visible and readable
+- **Motion sensitivity** (`prefers-reduced-motion`): Animations are disabled for users with vestibular disorders
+- **Zoom to 200%**: All content remains accessible at high magnification
+
+For detailed compliance information, see [WCAG 2.1 Accessibility Compliance](https://github.com/karpetrosyan/dubweave/blob/main/.specs/features/accessibility/WCAG-COMPLIANCE.md).
+
+---
+
 ## GPU Memory
 
 | Configuration | VRAM (approx.) |

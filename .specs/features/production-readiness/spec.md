@@ -126,6 +126,27 @@ Dubweave's core dubbing pipeline is fully functional after four high-severity fi
 
 ---
 
+### P1: Accessibility & Inclusive Design ⭐ MVP
+
+**User Story**: As a user with visual, motor, auditory, or cognitive disabilities, I want the web interface to be accessible so that I can use Dubweave independently without workarounds.
+
+**Why P1**: Accessibility is a legal requirement in many jurisdictions (WCAG 2.1 AA). It's not a feature—it's a baseline for production software.
+
+**Acceptance Criteria**:
+
+1. WHEN viewing the UI THEN all text shall have sufficient contrast (4.5:1 AA minimum for normal text, 7:1 AAA for enhanced)
+2. WHEN navigating with keyboard only THEN focus shall be visible on all interactive elements and no focus traps shall exist
+3. WHEN there are decorative header elements THEN a skip link shall allow bypassing them on first Tab press
+4. WHEN dynamic content changes (project status, pipeline progress, file generation) THEN screen readers shall announce the change via live regions
+5. WHEN using Windows High Contrast Mode or browser zoom to 200% THEN all content shall remain readable
+6. WHEN page contains animations THEN users with `prefers-reduced-motion` enabled shall not see them
+
+**Independent Test**: Full keyboard navigation of UI → verify focus visible everywhere. Test with NVDA/JAWS screen reader → verify all labels, buttons, status updates are announced. Check Windows High Contrast Mode → verify no invisible text. Check system `prefers-reduced-motion` → verify animations stop.
+
+**Reference**: [WCAG 2.1 Accessibility Compliance](../accessibility/WCAG-COMPLIANCE.md)
+
+---
+
 ## Edge Cases
 
 - WHEN YouTube returns a CAPTCHA or bot check THEN system SHALL display a message suggesting browser cookie auth
@@ -142,11 +163,12 @@ Dubweave's core dubbing pipeline is fully functional after four high-severity fi
 | PROD-01 | P1: Documentation & Setup | Tasks | Pending |
 | PROD-02 | P1: Error Handling & UX | Tasks | Pending |
 | PROD-03 | P1: Security & Configuration | Tasks | Pending |
+| PROD-07 | P1: Accessibility & Inclusive Design | **COMPLETE** ✅ | Done — [WCAG 2.1 AA + AAA contrast](../accessibility/WCAG-COMPLIANCE.md) |
 | PROD-04 | P2: Performance & Scalability | Tasks | Pending |
 | PROD-05 | P2: Testing & QA | Tasks | Pending |
 | PROD-06 | P3: Deployment & Monitoring | Tasks | Pending |
 
-**Coverage:** 6 total, 0 mapped to tasks, 6 unmapped ⚠️
+**Coverage:** 7 total, 1 complete, 6 unmapped ⚠️
 
 ---
 
