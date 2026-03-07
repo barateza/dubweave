@@ -143,15 +143,264 @@ GOOGLE_TTS_VOICE_CATALOG: dict[str, list[str]] = {
 JOB_MAX_AGE_H = 2  # hours before a stale job folder is eligible for cleanup (not configurable)
 
 
+# ── Log redaction (T11) ───────────────────────────────────────────────────────
+
+_REDACT_PATTERNS: list[str] = []
+
+
+def _init_redact_patterns() -> None:
+    """Build redaction list from current API key env vars."""
+    global _REDACT_PATTERNS
+    _REDACT_PATTERNS = []
+    for env_var in ("OPENROUTER_API_KEY", "GOOGLE_TTS_API_KEY"):
+        val = os.getenv(env_var, "").strip()
+        if len(val) > 8:
+            _REDACT_PATTERNS.append(val)
+
+
+def _redact(msg: str) -> str:
+    """Replace any known secret value with a masked version."""
+    for secret in _REDACT_PATTERNS:
+        msg = msg.replace(secret, f"{secret[:4]}****")
+    return msg
+
+
+_init_redact_patterns()
+
+
 # ── Step helpers ──────────────────────────────────────────────────────────────
 
 
 def log(msg: str, logs: list) -> list:
     timestamp = time.strftime("%H:%M:%S")
-    entry = f"[{timestamp}] {msg}"
+    entry = f"[{timestamp}] {_redact(str(msg))}"
     print(entry)
     logs.append(entry)
     return logs
+
+
+# ── Pipeline error (T5) ───────────────────────────────────────────────────────
+
+
+class PipelineError(Exception):
+    """User-facing pipeline error with stage context."""
+
+    def __init__(self, stage: str, message: str, recoverable: bool = False):
+        self.stage = stage
+        self.message = message
+        self.recoverable = recoverable
+        super().__init__(f"[{stage}] {message}")
+
+
+# ── YouTube URL validation (T4) ───────────────────────────────────────────────
+
+import re as _re_module
+
+_YT_URL_PATTERN = _re_module.compile(
+    r"^https?://(www\.)?(youtube\.com/watch\?[^\s]*v=[A-Za-z0-9_-]{11}"
+    r"|youtu\.be/[A-Za-z0-9_-]{11}"
+    r"|youtube\.com/shorts/[A-Za-z0-9_-]{11})"
+)
+
+
+def validate_youtube_url(url: str) -> tuple[bool, str]:
+    """Return (True, 'Valid') or (False, reason) for a YouTube video URL."""
+    url = url.strip()
+    if not url:
+        return False, "No URL provided."
+    if not _YT_URL_PATTERN.match(url):
+        return (
+            False,
+            f"'{url}' doesn't look like a YouTube URL. "
+            "Expected: https://youtube.com/watch?v=… or https://youtu.be/…",
+        )
+    return True, "Valid"
+
+
+# ── API key validation (T3) ───────────────────────────────────────────────────
+
+
+def validate_openrouter_key(api_key: str) -> tuple[bool, str]:
+    """Validate an OpenRouter API key via a lightweight /auth/key call."""
+    import urllib.request
+    import urllib.error
+
+    api_key = api_key.strip()
+    if not api_key:
+        return False, "No OpenRouter API key provided."
+    if not api_key.startswith("sk-or-"):
+        return False, "OpenRouter key must start with 'sk-or-'."
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/auth/key",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                return True, "Valid"
+            return False, f"OpenRouter returned HTTP {resp.status}."
+    except urllib.error.HTTPError as e:
+        return False, f"OpenRouter key invalid: HTTP {e.code}."
+    except Exception as e:
+        return False, f"OpenRouter key validation failed: {e}"
+
+
+def validate_google_tts_key(api_key: str) -> tuple[bool, str]:
+    """Validate a Google Cloud TTS API key via a voices.list call."""
+    import urllib.request
+    import urllib.error
+
+    api_key = api_key.strip()
+    if not api_key:
+        return False, "No Google TTS API key provided."
+    try:
+        url = f"https://texttospeech.googleapis.com/v1/voices?key={api_key}&languageCode=pt-BR"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            if resp.status == 200:
+                return True, "Valid"
+            return False, f"Google TTS returned HTTP {resp.status}."
+    except urllib.error.HTTPError as e:
+        return False, f"Google TTS key invalid: HTTP {e.code}."
+    except Exception as e:
+        return False, f"Google TTS key validation failed: {e}"
+
+
+# ── Environment validation (T2) ───────────────────────────────────────────────
+
+
+def validate_environment() -> list[str]:
+    """Check required tools at startup; return list of warning strings."""
+    warnings_list: list[str] = []
+
+    if shutil.which("espeak-ng") is None:
+        warnings_list.append(
+            "⚠️  espeak-ng not found — Kokoro TTS will fail. "
+            "Install from: https://github.com/espeak-ng/espeak-ng/releases/download/1.52.0/espeak-ng.msi "
+            "then restart your terminal."
+        )
+
+    if shutil.which("ffmpeg") is None:
+        warnings_list.append(
+            "⚠️  ffmpeg not found — video assembly will fail. "
+            "Run setup.bat to install all dependencies."
+        )
+
+    if shutil.which("ffprobe") is None:
+        warnings_list.append(
+            "⚠️  ffprobe not found — timing detection will fail. "
+            "Ensure ffmpeg is installed (ffprobe is bundled with it)."
+        )
+
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            warnings_list.append(
+                "⚠️  CUDA not available — GPU acceleration disabled. "
+                "Ensure NVIDIA drivers are installed and `nvidia-smi` shows your GPU."
+            )
+    except ImportError:
+        warnings_list.append("⚠️  PyTorch not installed — GPU acceleration unavailable.")
+
+    env_path = Path(__file__).parent / ".env"
+    env_example_path = Path(__file__).parent / ".env.example"
+    if not env_path.exists():
+        if env_example_path.exists():
+            shutil.copy(str(env_example_path), str(env_path))
+            warnings_list.append(
+                "ℹ️  .env created from .env.example — review settings before running."
+            )
+        else:
+            warnings_list.append(
+                "⚠️  .env not found — using built-in defaults. "
+                "Create a .env file to configure API keys and model choices."
+            )
+
+    return warnings_list
+
+
+# ── Retry with exponential backoff (T6) ──────────────────────────────────────
+
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 2.0):
+    """
+    Retry *fn* (a zero-argument callable) with exponential backoff.
+
+    Retries on transient HTTP errors (429/5xx) and network exceptions.
+    Raises immediately on non-retryable errors (401, 403, 404).
+    """
+    import urllib.error
+
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except urllib.error.HTTPError as e:
+            if attempt == max_retries or e.code not in _RETRYABLE_STATUS_CODES:
+                raise
+            delay = base_delay * (2**attempt)
+            time.sleep(delay)
+        except Exception:
+            if attempt == max_retries:
+                raise
+            delay = base_delay * (2**attempt)
+            time.sleep(delay)
+
+
+# ── GPU memory release (T7) ───────────────────────────────────────────────────
+
+
+def release_gpu_memory() -> None:
+    """Force GPU memory release between pipeline stages."""
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except ImportError:
+        pass
+
+
+# ── Startup info logging (T12) ────────────────────────────────────────────────
+
+
+def log_startup_info() -> None:
+    """Print environment diagnostics to stdout at application startup."""
+    import platform
+
+    print(f"[startup] Dubweave v0.1.0 starting")
+    print(f"[startup] Python {platform.python_version()} on {platform.system()} {platform.release()}")
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            print(f"[startup] CUDA {torch.version.cuda} — {torch.cuda.get_device_name(0)}")
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+            print(f"[startup] VRAM: {vram_gb:.1f} GB")
+        else:
+            print("[startup] CUDA not available — running CPU only")
+    except ImportError:
+        print("[startup] PyTorch not installed")
+
+    print(f"[startup] Whisper model: {WHISPER_MODEL}")
+    tts_engines = "Kokoro, XTTS v2"
+    if GOOGLE_TTS_API_KEY:
+        tts_engines += ", Google Cloud TTS"
+    print(f"[startup] TTS engines available: {tts_engines}")
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if openrouter_key:
+        print(f"[startup] OpenRouter: configured ({_redact(openrouter_key)})")
+    else:
+        print("[startup] OpenRouter: not configured (local NLLB-200 only)")
+
+    env_warnings = validate_environment()
+    for w in env_warnings:
+        print(f"[startup] {w}")
 
 
 def download_video(
@@ -441,57 +690,65 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
 # the perceptible difference in everyday spoken content.
 _PTPT_TO_PTBR = [
     # Pronouns / address
-    (r"tu", "você"),
-    (r"te", "te"),  # keep — both use "te" but context helps
-    (r"teu", "seu"),
-    (r"tua", "sua"),
-    (r"teus", "seus"),
-    (r"tuas", "suas"),
-    (r"vós", "vocês"),
+    (r"\btu\b", "você"),
+    (r"\bte\b", "te"),  # keep — both use "te" but context helps
+    (r"\bteu\b", "seu"),
+    (r"\btua\b", "sua"),
+    (r"\bteus\b", "seus"),
+    (r"\btuas\b", "suas"),
+    (r"\bvós\b", "vocês"),
     # Verb forms — 2nd person → 3rd person (você paradigm)
-    (r"estás", "está"),
-    (r"gostavas", "gostava"),
-    (r"gostas", "gosta"),
-    (r"fazes", "faz"),
-    (r"podes", "pode"),
-    (r"queres", "quer"),
-    (r"sabes", "sabe"),
-    (r"tens", "tem"),
-    (r"vens", "vem"),
-    (r"dizes", "diz"),
-    (r"vês", "vê"),
-    (r"vais", "vai"),
-    (r"ficas", "fica"),
-    (r"perceber", "entender"),
+    (r"\bestás\b", "está"),
+    (r"\bgostavas\b", "gostava"),
+    (r"\bgostas\b", "gosta"),
+    (r"\bfazes\b", "faz"),
+    (r"\bpodes\b", "pode"),
+    (r"\bqueres\b", "quer"),
+    (r"\bsabes\b", "sabe"),
+    (r"\btens\b", "tem"),
+    (r"\bvens\b", "vem"),
+    (r"\bdizes\b", "diz"),
+    (r"\bvês\b", "vê"),
+    (r"\bvais\b", "vai"),
+    (r"\bficas\b", "fica"),
+    (r"\bperceber\b", "entender"),
     # Gerund — PT-PT uses infinitive constructions, PT-BR uses gerund
     # "a verificar" → "verificando", "a fazer" → "fazendo" etc.
     (
-        r"a (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)",
-        lambda m: m.group(1) + "ndo",
+        r"\ba (verificar|fazer|dizer|ir|ter|ser|estar|ver|vir|dar|saber|poder|querer|ficar|falar|pensar|olhar|ouvir|sentir|aprender|entender|perceber|mostrar|colocar|pedir|deixar|ajudar|começar|continuar|precisar|tentar|achar|trazer|levar|passar|parecer|acontecer|escolher|cuidar|gostar|amar|crescer|brincar|rir|chorar|correr|andar|esperar|trabalhar|estudar|viver|morrer|ganhar|perder|mudar|criar|usar|encontrar|conhecer|acreditar|lembrar|esquecer|chamar|jogar)\b",
+        lambda m: (
+            m.group(1)[:-2] + "ando"
+            if m.group(1).endswith("ar")
+            else m.group(1)[:-2] + "endo"
+            if m.group(1).endswith("er")
+            else m.group(1)[:-2] + "indo"
+            if m.group(1).endswith("ir")
+            else m.group(1) + "ndo"
+        ),
     ),
     # Specific common phrases
-    (r"miúdos", "crianças"),
-    (r"fixe", "legal"),
-    (r"giro", "bonito"),
-    (r"chato", "chato"),  # same but keep
-    (r"propriamente", "corretamente"),
-    (r"sempre que", "sempre que"),
-    (r"certamente", "certamente"),
-    (r"apenas", "só"),
-    (r"somente", "só"),
-    (r"imensamente", "muito"),
-    (r"imenso", "enorme"),
-    (r"autocarro", "ônibus"),
-    (r"comboio", "trem"),
-    (r"telemovel", "celular"),
-    (r"telemovel", "celular"),
-    (r"telemóvel", "celular"),
-    (r"passeio", "calçada"),
-    (r"petróleos", "petróleo"),
-    (r"casas de banho", "banheiros"),
-    (r"casa de banho", "banheiro"),
-    (r"saneamento", "saneamento"),
-    (r"futebol", "futebol"),  # same
+    (r"\bmiúdos\b", "crianças"),
+    (r"\bfixe\b", "legal"),
+    (r"\bgiro\b", "bonito"),
+    (r"\bchato\b", "chato"),  # same but keep
+    (r"\bpropriamente\b", "corretamente"),
+    (r"\bsempre que\b", "sempre que"),
+    (r"\bcertamente\b", "certamente"),
+    (r"\bapenas\b", "só"),
+    (r"\bsomente\b", "só"),
+    (r"\bimensamente\b", "muito"),
+    (r"\bimenso\b", "enorme"),
+    (r"\bautocarro\b", "ônibus"),
+    (r"\bcomboio\b", "trem"),
+    (r"\btelemovel\b", "celular"),
+    (r"\btelemovel\b", "celular"),
+    (r"\btelemóvel\b", "celular"),
+    (r"\bpasseio\b", "calçada"),
+    (r"\bpetróleos\b", "petróleo"),
+    (r"\bcasas de banho\b", "banheiros"),
+    (r"\bcasa de banho\b", "banheiro"),
+    (r"\bsaneamento\b", "saneamento"),
+    (r"\bfutebol\b", "futebol"),  # same
 ]
 
 
@@ -632,8 +889,11 @@ def _call_openrouter(
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        data = json.loads(resp.read())
+    def _do_request():
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return json.loads(resp.read())
+
+    data = _retry_with_backoff(_do_request)
 
     raw = data["choices"][0]["message"]["content"].strip()
 
@@ -1325,10 +1585,14 @@ def synthesize_segments_google_tts(
         )
 
         # HIGH SEVERITY FIX 4: Add fallback for Google TTS API key failures
+        # Use retry with backoff for transient 429/5xx errors.
         data = None
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
+            def _do_google_tts():
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read())
+
+            data = _retry_with_backoff(_do_google_tts)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode(errors="replace")[:300]
             logs = log(f"   ⚠️  Google TTS API error (segment {i}): HTTP {e.code}\n{err_body}", logs)
@@ -2044,6 +2308,51 @@ def run_pipeline(
         logs = log(f"📁 Project: {proj}  |  Resume from: {resume_from}", logs)
         yield None, "\n".join(logs)
 
+        # ── Pre-flight: URL validation (T4) ───────────────────────────────────
+        if resume_idx <= stage_order["download"]:
+            url_ok, url_msg = validate_youtube_url(url)
+            if not url_ok:
+                raise PipelineError(
+                    "Validation",
+                    f"Invalid YouTube URL: {url_msg}",
+                    recoverable=False,
+                )
+
+        # ── Pre-flight: API key validation (T3) ──────────────────────────────
+        if openrouter_key:
+            logs = log("🔑 Validating OpenRouter API key…", logs)
+            yield None, "\n".join(logs)
+            ok, msg = validate_openrouter_key(openrouter_key)
+            if not ok:
+                raise PipelineError(
+                    "Validation",
+                    f"OpenRouter API key is invalid: {msg}. "
+                    "Fix OPENROUTER_API_KEY in .env, or remove it to use local NLLB-200.",
+                    recoverable=False,
+                )
+            logs = log("   ✅ OpenRouter key valid", logs)
+            yield None, "\n".join(logs)
+
+        if tts_engine == "Google Cloud TTS":
+            if not GOOGLE_TTS_API_KEY:
+                raise PipelineError(
+                    "Validation",
+                    "Google Cloud TTS selected but GOOGLE_TTS_API_KEY is not set in .env.",
+                    recoverable=False,
+                )
+            logs = log("🔑 Validating Google TTS API key…", logs)
+            yield None, "\n".join(logs)
+            ok, msg = validate_google_tts_key(GOOGLE_TTS_API_KEY)
+            if not ok:
+                raise PipelineError(
+                    "Validation",
+                    f"Google TTS API key is invalid: {msg}. "
+                    "Fix GOOGLE_TTS_API_KEY in .env or switch to a different TTS engine.",
+                    recoverable=False,
+                )
+            logs = log("   ✅ Google TTS key valid", logs)
+            yield None, "\n".join(logs)
+
         # ── Download ──────────────────────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
             if cookies_file:
@@ -2056,9 +2365,17 @@ def run_pipeline(
             yield None, "\n".join(logs)
 
             progress(0.05, desc="Downloading…")
-            video_path, audio_path, title, duration, logs = download_video(
-                url, job_dir, logs, browser=browser, cookies_file=cookies_file
-            )
+            try:
+                video_path, audio_path, title, duration, logs = download_video(
+                    url, job_dir, logs, browser=browser, cookies_file=cookies_file
+                )
+            except Exception as e:
+                raise PipelineError(
+                    "Download",
+                    f"yt-dlp failed: {e}. "
+                    "Check the URL, try browser cookies, or verify the video is publicly available.",
+                    recoverable=False,
+                ) from e
             save_project_stage(
                 proj, "download", (video_path, audio_path, title, duration)
             )
@@ -2074,9 +2391,20 @@ def run_pipeline(
         # ── Transcribe ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["transcribe"]:
             progress(0.2, desc="Transcribing…")
-            segments, logs = transcribe_audio(audio_path, logs, model_name=model_to_use)
+            try:
+                segments, logs = transcribe_audio(audio_path, logs, model_name=model_to_use)
+            except Exception as e:
+                raise PipelineError(
+                    "Transcribe",
+                    f"Whisper failed: {e}. "
+                    "Try a smaller model (set WHISPER_MODEL=base in .env) or check available VRAM.",
+                    recoverable=False,
+                ) from e
             save_project_stage(proj, "transcribe", segments)
             yield None, "\n".join(logs)
+            # Release Whisper GPU memory before loading translation model (T7)
+            release_gpu_memory()
+            logs = log("   🧹 GPU memory released after transcription", logs)
         else:
             logs = log("⏭️  Skipping transcription (loaded from project)", logs)
             segments = cast(list, load_project_stage(proj, "transcribe"))
@@ -2086,15 +2414,28 @@ def run_pipeline(
         # ── Translate ─────────────────────────────────────────────────────────
         if resume_idx <= stage_order["translate"]:
             progress(0.4, desc="Translating…")
-            translated, logs = translate_segments(
-                cast(list, segments), logs, openrouter_key=openrouter_key
-            )
-            progress(0.5, desc="Checking timing budget…")
-            translated, logs = apply_timing_budget(
-                translated, logs, openrouter_key=openrouter_key
-            )
+            try:
+                translated, logs = translate_segments(
+                    cast(list, segments), logs, openrouter_key=openrouter_key
+                )
+                progress(0.5, desc="Checking timing budget…")
+                translated, logs = apply_timing_budget(
+                    translated, logs, openrouter_key=openrouter_key
+                )
+            except PipelineError:
+                raise
+            except Exception as e:
+                raise PipelineError(
+                    "Translate",
+                    f"Translation failed: {e}. "
+                    "Check your OpenRouter key (if set) or verify the NLLB model is downloaded.",
+                    recoverable=True,
+                ) from e
             save_project_stage(proj, "translate", translated)
             yield None, "\n".join(logs)
+            # Release NLLB GPU memory before synthesis (T7)
+            release_gpu_memory()
+            logs = log("   🧹 GPU memory released after translation", logs)
         else:
             logs = log("⏭️  Skipping translation (loaded from project)", logs)
             translated = cast(list, load_project_stage(proj, "translate"))
@@ -2109,37 +2450,47 @@ def run_pipeline(
                 f"   Grouped {len(translated)} segments → {len(utterances)} utterances for sentence-level synthesis",
                 logs,
             )
-            if tts_engine == "Kokoro (fast, PT-BR native)":
-                timed_clips, logs = synthesize_segments_kokoro(
-                    utterances,
-                    job_dir,
-                    logs,
-                    voice=kokoro_voice,
-                )
-            elif tts_engine == "Google Cloud TTS":
-                if not GOOGLE_TTS_API_KEY:
-                    raise RuntimeError(
-                        "Google Cloud TTS selected but GOOGLE_TTS_API_KEY is not set in .env"
+            try:
+                if tts_engine == "Kokoro (fast, PT-BR native)":
+                    timed_clips, logs = synthesize_segments_kokoro(
+                        utterances,
+                        job_dir,
+                        logs,
+                        voice=kokoro_voice,
                     )
-                timed_clips, logs = synthesize_segments_google_tts(
-                    utterances,
-                    job_dir,
-                    logs,
-                    api_key=GOOGLE_TTS_API_KEY,
-                    voice_type=google_tts_voice_type,
-                    voice_name=google_tts_voice_name,
-                    language_code=GOOGLE_TTS_LANGUAGE_CODE,
-                )
-            else:
-                timed_clips, logs = synthesize_segments(
-                    utterances,
-                    audio_path,
-                    job_dir,
-                    logs,
-                    speaker_wav=speaker_wav_path,
-                )
+                elif tts_engine == "Google Cloud TTS":
+                    timed_clips, logs = synthesize_segments_google_tts(
+                        utterances,
+                        job_dir,
+                        logs,
+                        api_key=GOOGLE_TTS_API_KEY,
+                        voice_type=google_tts_voice_type,
+                        voice_name=google_tts_voice_name,
+                        language_code=GOOGLE_TTS_LANGUAGE_CODE,
+                    )
+                else:
+                    timed_clips, logs = synthesize_segments(
+                        utterances,
+                        audio_path,
+                        job_dir,
+                        logs,
+                        speaker_wav=speaker_wav_path,
+                    )
+            except PipelineError:
+                raise
+            except Exception as e:
+                raise PipelineError(
+                    "Synthesize",
+                    f"TTS synthesis failed: {e}. "
+                    "Check available VRAM. For Kokoro, ensure espeak-ng is installed. "
+                    "Resume from 'synthesize' after fixing the issue.",
+                    recoverable=True,
+                ) from e
             save_project_stage(proj, "synthesize", timed_clips)
             yield None, "\n".join(logs)
+            # Release TTS GPU memory before assembly (T7)
+            release_gpu_memory()
+            logs = log("   🧹 GPU memory released after synthesis", logs)
         else:
             logs = log("⏭️  Skipping synthesis (loaded from project)", logs)
             timed_clips = load_project_stage(proj, "synthesize")
@@ -2148,14 +2499,22 @@ def run_pipeline(
 
         # ── Assemble ──────────────────────────────────────────────────────────
         progress(0.85, desc="Assembling video…")
-        output_path, logs = assemble_dubbed_video(
-            video_path,
-            timed_clips,
-            float(duration or 0),
-            job_dir,
-            title or "video",
-            logs,
-        )
+        try:
+            output_path, logs = assemble_dubbed_video(
+                video_path,
+                timed_clips,
+                float(duration or 0),
+                job_dir,
+                title or "video",
+                logs,
+            )
+        except Exception as e:
+            raise PipelineError(
+                "Assemble",
+                f"FFmpeg assembly failed: {e}. "
+                "Ensure ffmpeg is installed. Resume from 'assemble' after fixing.",
+                recoverable=True,
+            ) from e
         save_project_stage(proj, "assemble", output_path)
 
         # Auto-generate SRT subtitles from the translated segments
@@ -2168,10 +2527,18 @@ def run_pipeline(
         progress(1.0, desc="Done!")
         yield output_path, "\n".join(logs)
 
+    except PipelineError as e:
+        resume_hint = (
+            f" You can resume from stage '{e.stage.lower()}' after fixing the issue."
+            if e.recoverable
+            else ""
+        )
+        logs = log(f"❌ [{e.stage}] {e.message}{resume_hint}", logs)
+        yield None, "\n".join(logs)
     except Exception as e:
         import traceback
 
-        logs = log(f"❌ Error: {e}\n{traceback.format_exc()}", logs)
+        logs = log(f"❌ Unexpected error: {e}\n{traceback.format_exc()}", logs)
         yield None, "\n".join(logs)
     finally:
         shutil.rmtree(str(job_dir), ignore_errors=True)
@@ -2390,6 +2757,9 @@ video { border-radius: 12px !important; }
 
 
 def build_ui():
+    # Collect environment warnings to display in the UI (T2)
+    _env_warnings = validate_environment()
+
     with gr.Blocks(title="Dubweave — PT-BR") as demo:
 
         gr.HTML("""
@@ -2416,6 +2786,19 @@ def build_ui():
           <span class="step active"><span class="step-dot"></span>Mux</span>
         </div>
         """)
+
+        if _env_warnings:
+            warning_items = "".join(
+                f"<li style='margin-bottom:6px;'>{w}</li>" for w in _env_warnings
+            )
+            gr.HTML(
+                f"""<div style="background:rgba(255,79,110,0.08);border:1px solid rgba(255,79,110,0.3);"""
+                f"""border-radius:10px;padding:14px 18px;margin-bottom:16px;"""
+                f"""font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:#ff4f6e;">"""
+                f"""<strong>⚠️ Setup Warnings</strong>"""
+                f"""<ul style='margin:8px 0 0;padding-left:20px;line-height:1.8;'>{warning_items}</ul>"""
+                f"""</div>"""
+            )
 
         with gr.Row():
             with gr.Column(scale=3):
@@ -2707,6 +3090,7 @@ def build_ui():
 
 
 if __name__ == "__main__":
+    log_startup_info()
     demo = build_ui()
     demo.queue(max_size=3)
     demo.launch(

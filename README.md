@@ -183,6 +183,64 @@ Pipeline code: MIT. Models: XTTS v2 (Coqui PLM), NLLB (MIT/Apache 2.0), Whisper 
 
 ---
 
+## Troubleshooting
+
+### "espeak-ng not found" / Kokoro fails at startup
+
+Kokoro TTS requires espeak-ng for phoneme processing.
+
+1. Download and install the MSI: <https://github.com/espeak-ng/espeak-ng/releases/download/1.52.0/espeak-ng.msi>
+2. Close and reopen your terminal (or restart `start.bat`)
+3. Verify: `espeak-ng --version` should print a version number
+
+### "CUDA not available" / no GPU detected
+
+1. Install or update NVIDIA drivers: <https://www.nvidia.com/Download/index.aspx>
+2. Verify GPU is visible: run `nvidia-smi` in a terminal
+3. Minimum VRAM: 4 GB (Kokoro mode), 8 GB (XTTS v2 mode)
+4. Ensure `pytorch-cuda` version matches your driver (the `pixi.toml` pins `12.4`)
+
+### "yt-dlp download fails" / 403 / PO token error
+
+YouTube periodically changes its challenge system. Try these options in order:
+
+1. **Use browser cookies** — select your browser in the "YouTube Account" accordion in the UI
+2. **Use cookies.txt** — export cookies with the _Get cookies.txt LOCALLY_ browser extension and upload the file in the UI
+3. **Re-run setup** to refresh the Deno EJS solver: double-click `setup.bat` again
+
+### "Pixi not found" after installation
+
+Close your terminal completely, reopen it, and try again. Pixi adds itself to `PATH` via a terminal restart, not just a profile reload.
+
+### ".env file not found" / missing configuration
+
+A `.env` is created automatically from `.env.example` on first run. If this doesn't happen:
+
+```bat
+copy .env.example .env
+```
+
+Open `.env` with a text editor and review all settings before running.
+
+### OpenRouter API key invalid
+
+- Key must start with `sk-or-`
+- Obtain a key at <https://openrouter.ai/keys>
+- The pipeline validates the key before starting; an invalid key stops execution immediately with a clear error
+
+### Disk space errors
+
+- Models require ~12 GB total; outputs can grow large for long videos
+- Clean up the `outputs/` directory periodically
+- The pipeline cleans up temporary work files automatically after each run
+
+### App crashes mid-synthesis on a long video
+
+- Switch from XTTS v2 to **Kokoro** (lower VRAM footprint)
+- After a crash, resume from the `synthesize` stage in the UI — completed segment checkpoints are preserved in the project directory
+
+---
+
 ## Acknowledgements
 
 This project bundles and integrates several third-party tools and models. Thank you to the authors and maintainers of the following projects — please review each project's license before redistribution or commercial use.

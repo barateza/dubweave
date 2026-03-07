@@ -31,6 +31,7 @@ gradio = "*"
 sentencepiece = "*"           # required by NLLB-200 tokenizer
 triton-windows = "*"           # Windows port of Triton — GPU kernels for Whisper DTW/median ops
 kokoro = "*"                   # Kokoro-82M TTS — 82M params, native PT-BR, Apache 2.0
+pytest = ">=7.0"
 hf_xet = "*"                   # Faster HF downloads
 soundfile = "*"                # WAV I/O for Kokoro numpy output
 python-dotenv = "*"            # Load environment variables from .env file
@@ -42,4 +43,5 @@ download-kokoro = "python -W ignore -c \"from kokoro import KPipeline; KPipeline
 fetch-ejs      = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
 setup          = { depends-on = ["download-nllb", "download-xtts", "download-kokoro", "fetch-ejs"] }
 format         = "black app.py"
+test           = "pytest tests/ -v"
 start          = "python app.py"
