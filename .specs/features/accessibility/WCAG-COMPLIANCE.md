@@ -14,7 +14,7 @@ The Dubweave web UI (Gradio-based) now meets **WCAG 2.1 Level AA** compliance wi
 ### Compliance Status
 
 | Criterion | Level | Status | Notes |
-|-----------|-------|--------|-------|
+| ----------- | ------- | -------- | ------- |
 | **Perceivable** | AA | ✅ PASS | Text alternatives, color contrast, readability |
 | **Operable** | AA | ✅ PASS | Keyboard navigation, focus visible, no traps |
 | **Understandable** | AA | ✅ PASS | Consistent navigation, form labels, error handling |
@@ -103,7 +103,7 @@ The Dubweave web UI (Gradio-based) now meets **WCAG 2.1 Level AA** compliance wi
 ## What Was NOT Fixed (Intentional Out-of-Scope)
 
 | Criterion | Reason | Impact |
-|-----------|--------|--------|
+| ----------- | -------- | -------- |
 | **2.5.5 Target Size** | Gradio controls button/input dimensions; can't guarantee 44×44 without full theme override | Low priority; keyboard users have full access |
 | **3.1.4 Abbreviations** | Acronyms (VRAM, GPU, XTTS, PT-BR, SRT) are the domain language — explicating them bloats UI | Audience is developers/ML practitioners who know these terms |
 | **3.2.5 Change on Request** | Project status updates live on keystroke; removing interactivity breaks useful UX | Policy tradeoff: UX > pure AAA compliance |
