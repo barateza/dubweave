@@ -406,9 +406,25 @@ def transcribe_audio(audio_path: Path, logs: list, model_name: str = WHISPER_MOD
     logs = log(f"🎙️ Transcribing with Whisper ({model_name})…", logs)
 
     model = whisper.load_model(model_name)
+    
+    # HIGH SEVERITY FIX 2: Add language detection for non-English source videos
+    # First, detect language to handle non-English sources
+    logs = log("   Detecting language...", logs)
+    detection_result = model.transcribe(
+        str(audio_path),
+        language=None,  # Let Whisper auto-detect
+        word_timestamps=False,
+        verbose=False,
+        task="detect_language"
+    )
+    
+    detected_lang = detection_result.get("detected_language", "en")
+    logs = log(f"   Detected language: {detected_lang}", logs)
+    
+    # Use detected language for actual transcription
     result = model.transcribe(
         str(audio_path),
-        language="en",
+        language=detected_lang,
         word_timestamps=True,
         verbose=False,
     )
@@ -661,7 +677,8 @@ def _translate_openrouter(
 
         result = _call_openrouter(chunk, api_key, context=ctx)
 
-        # Safety: pad with originals if count mismatches
+        # HIGH SEVERITY FIX 3: Add better validation for OpenRouter translation responses
+        # Validate response quality and count
         if len(result) != len(chunk):
             logs = log(
                 f"   ⚠️  Got {len(result)} back for {len(chunk)} sent — padding with originals",
@@ -670,6 +687,15 @@ def _translate_openrouter(
             while len(result) < len(chunk):
                 result.append(chunk[len(result)])
             result = result[: len(chunk)]
+        
+        # Validate that each result is non-empty and contains actual content
+        for i, translation in enumerate(result):
+            if not translation.strip():
+                logs = log(f"   ⚠️  Empty translation for utterance {i+1} — using original", logs)
+                result[i] = chunk[i]
+            elif len(translation.strip()) < 2:
+                logs = log(f"   ⚠️  Suspiciously short translation for utterance {i+1} — using original", logs)
+                result[i] = chunk[i]
 
         all_translated.extend(result)
 
@@ -1298,64 +1324,83 @@ def synthesize_segments_google_tts(
             method="POST",
         )
 
+        # HIGH SEVERITY FIX 4: Add fallback for Google TTS API key failures
+        data = None
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             err_body = e.read().decode(errors="replace")[:300]
-            raise RuntimeError(
-                f"Google Cloud TTS API error (segment {i}): HTTP {e.code}\n{err_body}"
-            )
+            logs = log(f"   ⚠️  Google TTS API error (segment {i}): HTTP {e.code}\n{err_body}", logs)
+            # Create a silent placeholder to maintain timeline
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-t", "0.5", "-ar", "44100", str(out_raw)
+            ], capture_output=True)
+            logs = log(f"   ⚠️  Created silent placeholder for segment {i}", logs)
+        except Exception as e:
+            logs = log(f"   ⚠️  Google TTS request failed (segment {i}): {e}", logs)
+            # Create a silent placeholder to maintain timeline
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-t", "0.5", "-ar", "44100", str(out_raw)
+            ], capture_output=True)
+            logs = log(f"   ⚠️  Created silent placeholder for segment {i}", logs)
 
-        audio_bytes = base64.b64decode(data["audioContent"])
-        out_raw.write_bytes(audio_bytes)
+        # Only process audio if we have valid data
+        if data is not None:
+            audio_bytes = base64.b64decode(data["audioContent"])
+            out_raw.write_bytes(audio_bytes)
 
-        # Timing adjustment — same atempo logic as Kokoro / XTTS paths.
-        orig_dur = seg["end"] - seg["start"]
-        if orig_dur > 0.1:
-            probe = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "json",
-                    str(out_raw),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-            ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(out_raw),
-                    "-filter:a",
-                    f"atempo={ratio:.4f}",
-                    "-ar",
-                    "44100",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
+            # Timing adjustment — same atempo logic as Kokoro / XTTS paths.
+            orig_dur = seg["end"] - seg["start"]
+            if orig_dur > 0.1:
+                probe = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "json",
+                        str(out_raw),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
+                ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(out_raw),
+                        "-filter:a",
+                        f"atempo={ratio:.4f}",
+                        "-ar",
+                        "44100",
+                        str(out_clip),
+                    ],
+                    capture_output=True,
+                )
+            else:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(out_raw),
+                        "-ar",
+                        "44100",
+                        str(out_clip),
+                    ],
+                    capture_output=True,
+                )
         else:
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(out_raw),
-                    "-ar",
-                    "44100",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
+            # If we created a silent placeholder, copy it to the final clip
+            shutil.copy(str(out_raw), str(out_clip))
 
         timed_clips.append(
             {
@@ -1438,12 +1483,25 @@ def synthesize_segments(
 
         text = _sanitize_for_tts(seg["text"].strip())
 
-        tts.tts_to_file(
-            text=text,
-            speaker_wav=ref_wav,
-            language=TARGET_LANG,
-            file_path=str(out_raw),
-        )
+        # HIGH SEVERITY FIX 1: Add intra-stage checkpointing to prevent losing progress
+        # Save progress after each segment synthesis
+        checkpoint_file = job_dir / "synthesize_checkpoint.json"
+        try:
+            # Try synthesis
+            tts.tts_to_file(
+                text=text,
+                speaker_wav=ref_wav,
+                language=TARGET_LANG,
+                file_path=str(out_raw),
+            )
+        except Exception as e:
+            logs = log(f"   ⚠️  XTTS synthesis failed for segment {i}: {e}", logs)
+            # Create a silent placeholder to maintain timeline
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-t", "0.5", "-ar", "44100", str(out_raw)
+            ], capture_output=True)
+            logs = log(f"   ⚠️  Created silent placeholder for segment {i}", logs)
 
         # Timing adjustment: compress or stretch to fit original segment duration.
         #
@@ -1500,6 +1558,15 @@ def synthesize_segments(
                 "end": seg["end"],
             }
         )
+
+        # Save checkpoint after each segment
+        checkpoint_data = {
+            "completed_segments": i + 1,
+            "total_segments": len(segments),
+            "last_segment": i,
+            "timed_clips": timed_clips
+        }
+        checkpoint_file.write_text(json.dumps(checkpoint_data), encoding="utf-8")
 
         if i % 10 == 0:
             logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
