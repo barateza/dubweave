@@ -4,6 +4,8 @@ Uses: yt-dlp → Whisper → NLLB-200 (local PT-BR) → XTTS v2 (GPU) → FFmpeg
 Fallback translation: OpenRouter API (configurable model)
 """
 
+__version__ = "0.1.0"
+
 import os
 import sys
 import json
@@ -373,7 +375,7 @@ def log_startup_info() -> None:
     """Print environment diagnostics to stdout at application startup."""
     import platform
 
-    print(f"[startup] Dubweave v0.1.0 starting")
+    print(f"[startup] Dubweave v{__version__} starting")
     print(f"[startup] Python {platform.python_version()} on {platform.system()} {platform.release()}")
     try:
         import torch
