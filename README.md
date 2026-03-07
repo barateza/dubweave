@@ -1,6 +1,6 @@
 # Dubweave 🎬
 
-> YouTube → Brazilian Portuguese dubbing pipeline, fully local, GPU-accelerated.
+> Any video → Brazilian Portuguese dubbing pipeline, fully local, GPU-accelerated.
 >
 > _Dedicado à Aline ❤️_
 
@@ -8,20 +8,22 @@
 
 ## Why I built this
 
-My wife Aline speaks Portuguese, and I kept coming across English content — YouTube essays, documentaries, interviews — that I wanted to share with her but couldn't because of the language barrier. Subtitles help, but watching dubbed video together is a completely different experience: she can follow without reading, and we can just enjoy it side by side.
+My wife Aline speaks Portuguese, and I kept coming across English content — essays, documentaries, interviews — that I wanted to share with her but couldn't because of the language barrier. Subtitles help, but watching dubbed video together is a completely different experience: she can follow without reading, and we can just enjoy it side by side.
 
 Beyond that, this project was a deliberate learning exercise. I wanted to understand, end-to-end, how modern AI pipelines actually fit together — not just call an API and get a result, but build the full stack myself: automatic speech recognition with Whisper, neural machine translation with NLLB-200, large-language-model translation with context windows, a text-to-speech voice-cloning system with XTTS v2, a lightweight native TTS model with Kokoro-82M, and media assembly with FFmpeg. Every stage taught something different — how to manage GPU memory across multiple models, how to handle timing constraints when synthesized speech is a different length than the original, how to make download pipelines resilient to platform countermeasures, and how to build a UI that exposes all of this without getting in the way.
 
-The result is a fully local, privacy-preserving dubbing pipeline that runs on a consumer GPU and produces a watchable dubbed MP4 from any YouTube URL. It's personal software built for a personal reason, and that made it easy to care about the details.
+The result is a fully local, privacy-preserving dubbing pipeline that runs on a consumer GPU and produces a watchable dubbed MP4 from any video source. Every stage taught something different: how to manage GPU memory across multiple models, how to handle timing constraints when synthesized speech is a different length than the original, how to make download and upload pipelines resilient, and how to build a UI that exposes all of this without getting in the way.
+
+The result is a fully local, privacy-preserving dubbing pipeline that runs on a consumer GPU and produces a watchable dubbed MP4 from any video source. It's personal software built for a personal reason, and that made it easy to care about the details.
 
 ---
 
 ## What it does
 
 ```text
-YouTube URL
-    ↓  yt-dlp (aria2c + Deno)  → downloads best video + audio track separately
-    ↓  Whisper (GPU)            → transcribes English speech (large-v3-turbo)
+Any URL or local file upload
+    ↓  yt-dlp / Local Ingest    → downloads from any site or uses local file
+    ↓  Whisper (GPU)            → transcribes speech (large-v3-turbo)
     ↓  Segment Merging          → groups fragments into semantic utterances
     ↓  NLLB-200 / OpenRouter    → translates EN→PT-BR (local or LLM)
     ↓  PT-BR Norm               → 30+ rules: pronouns, gerunds, Brazilian vocab
