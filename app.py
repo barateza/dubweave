@@ -381,7 +381,8 @@ def log_startup_info() -> None:
         import torch
 
         if torch.cuda.is_available():
-            print(f"[startup] CUDA {torch.version.cuda} — {torch.cuda.get_device_name(0)}")
+            import torch.version as _torch_version
+            print(f"[startup] CUDA {_torch_version.cuda} — {torch.cuda.get_device_name(0)}")
             vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[startup] VRAM: {vram_gb:.1f} GB")
         else:
@@ -896,6 +897,8 @@ def _call_openrouter(
             return json.loads(resp.read())
 
     data = _retry_with_backoff(_do_request)
+    if data is None:
+        raise RuntimeError("_retry_with_backoff returned None — request failed")
 
     raw = data["choices"][0]["message"]["content"].strip()
 
@@ -1551,13 +1554,17 @@ def synthesize_segments_google_tts(
     segments = [s for s in segments if s.get("text", "").strip()]
 
     logs = log(
-        f"🎤 Synthesizing {len(segments)} segments (Google Cloud TTS)…", logs
+        f"🎤 Synthesizing {len(segments)} segments (Google Cloud TTS, up to 16 concurrent)…", logs
     )
 
-    timed_clips = []
-    for i, seg in enumerate(segments):
-        out_raw = seg_dir / f"seg_{i:04d}_raw.wav"
-        out_clip = seg_dir / f"seg_{i:04d}.wav"
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: list[dict | None] = [None] * len(segments)  # pre-sized; indexed by segment position
+    errors = []
+
+    def _synthesize_one(idx, seg):
+        out_raw = seg_dir / f"seg_{idx:04d}_raw.wav"
+        out_clip = seg_dir / f"seg_{idx:04d}.wav"
 
         text = _sanitize_for_tts(seg["text"].strip())
 
@@ -1597,21 +1604,21 @@ def synthesize_segments_google_tts(
             data = _retry_with_backoff(_do_google_tts)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode(errors="replace")[:300]
-            logs = log(f"   ⚠️  Google TTS API error (segment {i}): HTTP {e.code}\n{err_body}", logs)
+            errors.append(f"   ⚠️  Google TTS API error (segment {idx}): HTTP {e.code}\n{err_body}")
             # Create a silent placeholder to maintain timeline
             subprocess.run([
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                 "-t", "0.5", "-ar", "44100", str(out_raw)
             ], capture_output=True)
-            logs = log(f"   ⚠️  Created silent placeholder for segment {i}", logs)
-        except Exception as e:
-            logs = log(f"   ⚠️  Google TTS request failed (segment {i}): {e}", logs)
+            errors.append(f"   ⚠️  Created silent placeholder for segment {idx}")
+        except Exception as exc:
+            errors.append(f"   ⚠️  Google TTS request failed (segment {idx}): {exc}")
             # Create a silent placeholder to maintain timeline
             subprocess.run([
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                 "-t", "0.5", "-ar", "44100", str(out_raw)
             ], capture_output=True)
-            logs = log(f"   ⚠️  Created silent placeholder for segment {i}", logs)
+            errors.append(f"   ⚠️  Created silent placeholder for segment {idx}")
 
         # Only process audio if we have valid data
         if data is not None:
@@ -1668,16 +1675,31 @@ def synthesize_segments_google_tts(
             # If we created a silent placeholder, copy it to the final clip
             shutil.copy(str(out_raw), str(out_clip))
 
-        timed_clips.append(
-            {
-                "path": str(out_clip),
-                "start": seg["start"],
-                "end": seg["end"],
-            }
-        )
+        return {
+            "path": str(out_clip),
+            "start": seg["start"],
+            "end": seg["end"],
+        }
 
-        if i % 10 == 0:
-            logs = log(f"   Segment {i+1}/{len(segments)}…", logs)
+    total = len(segments)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        future_to_idx = {
+            executor.submit(_synthesize_one, i, seg): i
+            for i, seg in enumerate(segments)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            results[idx] = future.result()
+            completed += 1
+            if completed % 10 == 0 or completed == total:
+                logs = log(f"   Segment {completed}/{total} done…", logs)
+
+    # Flush any per-segment error messages collected from worker threads
+    for msg in errors:
+        logs = log(msg, logs)
+
+    timed_clips = results
 
     logs = log("✅ All segments synthesized (Google Cloud TTS)", logs)
     return timed_clips, logs
@@ -3129,6 +3151,7 @@ def build_ui():
                 google_voice_input,
             ],
             outputs=[video_output, log_output],
+            show_progress="minimal",
         )
 
     return demo
