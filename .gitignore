@@ -183,5 +183,3 @@ cython_debug/
 .pixi/
 
 /projects
-/.agent
-/.agents

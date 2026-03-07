@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "skills": {
+    "accessibility": {
+      "name": "accessibility",
+      "source": "local",
+      "contentHash": "706129400c8c91a9264582940b36007116faffcaf27bb0780bdab87337b4f881",
+      "installedAt": "2026-03-07T02:15:05.495Z",
+      "updatedAt": "2026-03-07T02:15:05.495Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "best-practices": {
+      "name": "best-practices",
+      "source": "local",
+      "contentHash": "2abba650ba22a819e67f8c2fb09d0f5f33a24d66d945ee2ef824751bc97151ce",
+      "installedAt": "2026-03-07T02:15:05.500Z",
+      "updatedAt": "2026-03-07T02:15:05.500Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "codenavi": {
+      "name": "codenavi",
+      "source": "local",
+      "contentHash": "23ac05b7f2d8df8311129d41432eba248bdcf14e9ace3f17c581976f7d888ada",
+      "installedAt": "2026-03-07T02:15:05.505Z",
+      "updatedAt": "2026-03-07T02:15:05.505Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "coding-guidelines": {
+      "name": "coding-guidelines",
+      "source": "local",
+      "contentHash": "28a414c715d3c41aae28a25e2f109813ec3f246f76b5567c1e7d6a128cd289ff",
+      "installedAt": "2026-03-07T02:15:05.509Z",
+      "updatedAt": "2026-03-07T02:15:05.509Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "docs-writer": {
+      "name": "docs-writer",
+      "source": "local",
+      "contentHash": "c49827c59d2e27d313731dfd36314cfde0e8dbf15be0e8f813d2f8b751546b0c",
+      "installedAt": "2026-03-07T02:15:05.513Z",
+      "updatedAt": "2026-03-07T02:15:05.513Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "security-best-practices": {
+      "name": "security-best-practices",
+      "source": "local",
+      "contentHash": "6fec09f7e43bb297ad6097e13469e85aa5b5d671a839b4f7e7871ef8eaa76c4e",
+      "installedAt": "2026-03-07T02:15:05.531Z",
+      "updatedAt": "2026-03-07T02:15:05.531Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "the-fool": {
+      "name": "the-fool",
+      "source": "local",
+      "contentHash": "b761f983e21e00173ac42760f478095a3e8c733862c20d9f711d10d962f407cc",
+      "installedAt": "2026-03-07T02:15:05.539Z",
+      "updatedAt": "2026-03-07T02:15:05.539Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "tlc-spec-driven": {
+      "name": "tlc-spec-driven",
+      "source": "local",
+      "contentHash": "79d0e1b750dfc70820ac0152d9ca78927c398f669397e9cdb8bb812ceca2fbc6",
+      "installedAt": "2026-03-07T02:15:05.553Z",
+      "updatedAt": "2026-03-07T02:15:05.553Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    }
+  }
+}
