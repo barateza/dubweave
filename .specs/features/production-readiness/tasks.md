@@ -55,6 +55,7 @@ T11 → T12
 **Requirement**: PROD-01
 
 **Example**:
+
 ```markdown
 ## Troubleshooting
 
@@ -73,6 +74,7 @@ to select your browser (Chrome, Firefox, Edge).
 ```
 
 **Done when**:
+
 - [ ] Troubleshooting section covers espeak-ng, CUDA, yt-dlp, Pixi, and .env issues
 - [ ] Each entry has symptoms, cause, and fix
 
@@ -86,6 +88,7 @@ to select your browser (Chrome, Firefox, Edge).
 **Requirement**: PROD-01, PROD-03
 
 **Example**:
+
 ```python
 def validate_environment() -> list[str]:
     """Check required tools and report missing ones."""
@@ -108,6 +111,7 @@ def validate_environment() -> list[str]:
 ```
 
 **Done when**:
+
 - [ ] Function checks: espeak-ng, ffmpeg, ffprobe, CUDA, .env
 - [ ] Warnings displayed in Gradio UI on startup
 - [ ] Missing tools named with install instructions
@@ -122,6 +126,7 @@ def validate_environment() -> list[str]:
 **Requirement**: PROD-03
 
 **Example**:
+
 ```python
 def validate_openrouter_key(api_key: str) -> tuple[bool, str]:
     """Validate OpenRouter API key with a lightweight auth check."""
@@ -150,6 +155,7 @@ def validate_google_tts_key(api_key: str) -> tuple[bool, str]:
 ```
 
 **Done when**:
+
 - [ ] OpenRouter key validated via /auth/key endpoint
 - [ ] Google TTS key validated via voices.list endpoint
 - [ ] Validation called in `run_pipeline()` before starting work
@@ -165,6 +171,7 @@ def validate_google_tts_key(api_key: str) -> tuple[bool, str]:
 **Requirement**: PROD-03
 
 **Example**:
+
 ```python
 import re
 
@@ -183,6 +190,7 @@ def validate_youtube_url(url: str) -> tuple[bool, str]:
 ```
 
 **Done when**:
+
 - [ ] Regex validates youtube.com/watch, youtu.be, and youtube.com/shorts patterns
 - [ ] Invalid URLs caught before yt-dlp is invoked
 - [ ] Error message suggests the expected format
@@ -197,6 +205,7 @@ def validate_youtube_url(url: str) -> tuple[bool, str]:
 **Requirement**: PROD-02
 
 **Example**:
+
 ```python
 class PipelineError(Exception):
     """User-facing pipeline error with stage context."""
@@ -219,6 +228,7 @@ except Exception as e:
 ```
 
 **Done when**:
+
 - [ ] PipelineError class with stage, message, recoverable fields
 - [ ] Each pipeline stage wrapped with descriptive error message
 - [ ] Gradio UI displays stage name + actionable message, not raw traceback
@@ -234,6 +244,7 @@ except Exception as e:
 **Requirement**: PROD-02
 
 **Example**:
+
 ```python
 def _retry_with_backoff(fn, max_retries=3, base_delay=2.0):
     """Retry a callable with exponential backoff on transient errors."""
@@ -249,6 +260,7 @@ def _retry_with_backoff(fn, max_retries=3, base_delay=2.0):
 ```
 
 **Done when**:
+
 - [ ] OpenRouter calls retry on 429/5xx with exponential backoff
 - [ ] Google TTS calls retry on transient errors
 - [ ] Max 3 retries, delays: 2s → 4s → 8s
@@ -264,6 +276,7 @@ def _retry_with_backoff(fn, max_retries=3, base_delay=2.0):
 **Requirement**: PROD-04
 
 **Example**:
+
 ```python
 def release_gpu_memory():
     """Force GPU memory release between pipeline stages."""
@@ -280,6 +293,7 @@ log("GPU memory released after transcription")
 ```
 
 **Done when**:
+
 - [ ] `release_gpu_memory()` called after transcription, after translation (if NLLB), and after synthesis
 - [ ] GPU memory drops measurably between stages (verify with `torch.cuda.memory_allocated()`)
 
@@ -293,6 +307,7 @@ log("GPU memory released after transcription")
 **Requirement**: PROD-04
 
 **Example**:
+
 ```python
 # In run_pipeline():
 job_dir = WORK_DIR / project_name
@@ -310,6 +325,7 @@ finally:
 ```
 
 **Done when**:
+
 - [ ] Job-specific temp dir cleaned on success
 - [ ] Job-specific temp dir cleaned on failure (finally block)
 - [ ] Existing stale-job cleaner remains as fallback
@@ -324,6 +340,7 @@ finally:
 **Requirement**: PROD-05
 
 **Example**:
+
 ```python
 # tests/test_core.py
 import pytest
@@ -371,6 +388,7 @@ class TestYouTubeUrl:
 ```
 
 **Done when**:
+
 - [ ] Tests cover: `_ptpt_to_ptbr`, `_merge_segments`, `_srt_timestamp`, `_wrap_subtitle_line`, `validate_youtube_url`
 - [ ] Each function tested with: normal input, empty input, boundary cases
 - [ ] `pixi run test` executes all tests
@@ -385,6 +403,7 @@ class TestYouTubeUrl:
 **Requirement**: PROD-05
 
 **Example**:
+
 ```toml
 # In [pypi-dependencies]:
 pytest = ">=7.0"
@@ -394,6 +413,7 @@ test = "pytest tests/ -v"
 ```
 
 **Done when**:
+
 - [ ] `pytest` added to pypi-dependencies
 - [ ] `pixi run test` works and runs all tests
 - [ ] Tests pass
@@ -408,6 +428,7 @@ test = "pytest tests/ -v"
 **Requirement**: PROD-03, PROD-06
 
 **Example**:
+
 ```python
 _REDACT_PATTERNS = []
 
@@ -433,6 +454,7 @@ def log(msg, logs=None):
 ```
 
 **Done when**:
+
 - [ ] All API key values redacted from log output
 - [ ] Redaction covers both OpenRouter and Google TTS keys
 - [ ] Partial key shown (first 4 chars) for debugging
@@ -447,6 +469,7 @@ def log(msg, logs=None):
 **Requirement**: PROD-06
 
 **Example**:
+
 ```python
 def log_startup_info():
     """Log environment details for diagnostics."""
@@ -468,6 +491,7 @@ def log_startup_info():
 ```
 
 **Done when**:
+
 - [ ] Python version, OS, CUDA status logged at startup
 - [ ] GPU name and VRAM logged if available
 - [ ] Config summary (models, available TTS engines) logged
