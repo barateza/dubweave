@@ -1,7 +1,8 @@
 """
-YT Dubber — YouTube → Brazilian Portuguese Dubbing Pipeline
+Dubweave — Video → Brazilian Portuguese Dubbing Pipeline
 Uses: yt-dlp → Whisper → NLLB-200 (local PT-BR) → XTTS v2 (GPU) → FFmpeg
 Fallback translation: OpenRouter API (configurable model)
+Supports any URL handled by yt-dlp, or direct video file upload.
 """
 
 __version__ = "0.1.0"
@@ -194,10 +195,11 @@ class PipelineError(Exception):
         super().__init__(f"[{stage}] {message}")
 
 
-# ── YouTube URL validation (T4) ───────────────────────────────────────────────
+# ── Video source validation (T4) ──────────────────────────────────────────────
 
 import re as _re_module
 
+# Kept for backward compatibility with existing tests
 _YT_URL_PATTERN = _re_module.compile(
     r"^https?://(www\.)?(youtube\.com/watch\?[^\s]*v=[A-Za-z0-9_-]{11}"
     r"|youtu\.be/[A-Za-z0-9_-]{11}"
@@ -206,7 +208,10 @@ _YT_URL_PATTERN = _re_module.compile(
 
 
 def validate_youtube_url(url: str) -> tuple[bool, str]:
-    """Return (True, 'Valid') or (False, reason) for a YouTube video URL."""
+    """Return (True, 'Valid') or (False, reason) for a YouTube video URL.
+
+    Kept for backward compatibility. The pipeline now uses validate_video_source.
+    """
     url = url.strip()
     if not url:
         return False, "No URL provided."
@@ -217,6 +222,122 @@ def validate_youtube_url(url: str) -> tuple[bool, str]:
             "Expected: https://youtube.com/watch?v=… or https://youtu.be/…",
         )
     return True, "Valid"
+
+
+def validate_video_source(url: str, upload_path: str | None) -> tuple[bool, str]:
+    """Validate that at least one video source (URL or uploaded file) is provided.
+
+    Returns (True, 'url'|'file') or (False, reason).
+    Uploaded file takes priority over URL when both are provided.
+    """
+    has_file = bool(upload_path and upload_path.strip() and Path(upload_path.strip()).is_file())
+    has_url = bool(url and url.strip())
+
+    if has_file:
+        return True, "file"
+    if has_url:
+        return True, "url"
+    return False, "No video source provided. Paste a URL or upload a video file."
+
+
+# ── Local file ingestion ──────────────────────────────────────────────────────
+
+_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".ts", ".m4v"}
+
+
+def ingest_local_file(
+    upload_path: str,
+    job_dir: Path,
+    logs: list,
+) -> tuple[Path, Path, str, float, list]:
+    """Copy/re-encode an uploaded video file into the pipeline's expected format.
+
+    Returns (video_path, audio_path, title, duration, logs) — same shape as
+    download_video so the rest of the pipeline is source-agnostic.
+    """
+    src = Path(upload_path.strip())
+    logs = log(f"📂 Ingesting uploaded file: {src.name}", logs)
+
+    if not src.exists():
+        raise PipelineError("Ingest", f"Uploaded file not found: {src}", recoverable=False)
+    if src.suffix.lower() not in _VIDEO_EXTENSIONS:
+        raise PipelineError(
+            "Ingest",
+            f"Unsupported file type '{src.suffix}'. "
+            f"Expected video file ({', '.join(sorted(_VIDEO_EXTENSIONS))}).",
+            recoverable=False,
+        )
+
+    video_path = job_dir / "video.mp4"
+    audio_path = job_dir / "audio_orig.wav"
+
+    # Probe duration and title
+    title = src.stem
+    duration = 0.0
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json", str(src),
+            ],
+            capture_output=True, text=True,
+        )
+        if probe.returncode == 0:
+            duration = float(json.loads(probe.stdout)["format"]["duration"])
+    except Exception as e:
+        logs = log(f"⚠️  Could not probe duration: {e}", logs)
+
+    # Re-encode to mp4 if not already mp4, or copy if it is
+    if src.suffix.lower() == ".mp4":
+        logs = log("   File is mp4 — copying directly", logs)
+        shutil.copy2(str(src), str(video_path))
+    else:
+        logs = log(f"   Re-encoding {src.suffix} → mp4 for pipeline compatibility…", logs)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(src),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "192k",
+                "-movflags", "+faststart",
+                str(video_path),
+            ],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise PipelineError(
+                "Ingest",
+                f"ffmpeg re-encode failed: {result.stderr[-300:]}",
+                recoverable=False,
+            )
+
+    # Extract audio
+    logs = log("   Extracting audio…", logs)
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vn", "-ar", "44100", "-ac", "2", "-f", "wav",
+            str(audio_path),
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise PipelineError(
+            "Ingest",
+            f"Audio extraction failed: {result.stderr[-300:]}",
+            recoverable=False,
+        )
+
+    if not audio_path.exists() or audio_path.stat().st_size < 1024:
+        raise PipelineError(
+            "Ingest",
+            "Audio extraction produced an empty file. "
+            "The uploaded video may have no audio track.",
+            recoverable=False,
+        )
+
+    logs = log(f'✅ Ingested: "{title}" ({duration:.0f}s)', logs)
+    return video_path, audio_path, title, duration, logs
 
 
 # ── API key validation (T3) ───────────────────────────────────────────────────
@@ -416,10 +537,9 @@ def download_video(
     """
     Download video + audio with a self-healing format cascade.
 
-    YouTube's JS challenge solver breaks periodically, which makes DASH-only
-    formats unavailable. The cascade tries progressively more compatible
-    formats, ending with format 18 (360p muxed mp4) which is always a
-    progressive stream and never requires challenge solving.
+    The format cascade tries progressively more compatible formats,
+    ending with broadly available fallbacks. This works for any site
+    supported by yt-dlp (YouTube, Vimeo, Twitter/X, TikTok, etc.).
 
     Cascade — video track:
       1. bestvideo[ext=mp4]          — best MP4 DASH video (ideal)
@@ -2296,6 +2416,7 @@ def load_project_stage(name: str, stage: str) -> Any:
 
 def run_pipeline(
     url: str,
+    video_upload_path: str | None,
     speaker_wav_path: str | None,
     whisper_model: str,
     browser: str,
@@ -2332,15 +2453,17 @@ def run_pipeline(
         logs = log(f"📁 Project: {proj}  |  Resume from: {resume_from}", logs)
         yield None, "\n".join(logs)
 
-        # ── Pre-flight: URL validation (T4) ───────────────────────────────────
+        # ── Pre-flight: video source validation (T4) ─────────────────────────
+        source_mode = None  # 'url' or 'file'
         if resume_idx <= stage_order["download"]:
-            url_ok, url_msg = validate_youtube_url(url)
-            if not url_ok:
+            src_ok, src_result = validate_video_source(url, video_upload_path)
+            if not src_ok:
                 raise PipelineError(
                     "Validation",
-                    f"Invalid YouTube URL: {url_msg}",
+                    src_result,
                     recoverable=False,
                 )
+            source_mode = src_result  # 'url' or 'file'
 
         # ── Pre-flight: API key validation (T3) ──────────────────────────────
         if openrouter_key:
@@ -2377,29 +2500,46 @@ def run_pipeline(
             logs = log("   ✅ Google TTS key valid", logs)
             yield None, "\n".join(logs)
 
-        # ── Download ──────────────────────────────────────────────────────────
+        # ── Download / Ingest ─────────────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
-            if cookies_file:
-                cookie_msg = f"cookies.txt ({Path(cookies_file).name})"
-            elif browser != "none":
-                cookie_msg = f"browser cookies ({browser})"
+            if source_mode == "file":
+                # Local file upload path
+                progress(0.05, desc="Ingesting uploaded file…")
+                try:
+                    video_path, audio_path, title, duration, logs = ingest_local_file(
+                        video_upload_path, job_dir, logs  # type: ignore[arg-type]
+                    )
+                except PipelineError:
+                    raise
+                except Exception as e:
+                    raise PipelineError(
+                        "Ingest",
+                        f"Failed to process uploaded file: {e}",
+                        recoverable=False,
+                    ) from e
             else:
-                cookie_msg = "anonymous (no cookies)"
-            logs = log(f"🍪 Download mode: {cookie_msg}", logs)
-            yield None, "\n".join(logs)
+                # URL download path (any yt-dlp supported site)
+                if cookies_file:
+                    cookie_msg = f"cookies.txt ({Path(cookies_file).name})"
+                elif browser != "none":
+                    cookie_msg = f"browser cookies ({browser})"
+                else:
+                    cookie_msg = "anonymous (no cookies)"
+                logs = log(f"🍪 Download mode: {cookie_msg}", logs)
+                yield None, "\n".join(logs)
 
-            progress(0.05, desc="Downloading…")
-            try:
-                video_path, audio_path, title, duration, logs = download_video(
-                    url, job_dir, logs, browser=browser, cookies_file=cookies_file
-                )
-            except Exception as e:
-                raise PipelineError(
-                    "Download",
-                    f"yt-dlp failed: {e}. "
-                    "Check the URL, try browser cookies, or verify the video is publicly available.",
-                    recoverable=False,
-                ) from e
+                progress(0.05, desc="Downloading…")
+                try:
+                    video_path, audio_path, title, duration, logs = download_video(
+                        url, job_dir, logs, browser=browser, cookies_file=cookies_file
+                    )
+                except Exception as e:
+                    raise PipelineError(
+                        "Download",
+                        f"yt-dlp failed: {e}. "
+                        "Check the URL, try browser cookies, or verify the video is publicly available.",
+                        recoverable=False,
+                    ) from e
             save_project_stage(
                 proj, "download", (video_path, audio_path, title, duration)
             )
@@ -2914,10 +3054,27 @@ def build_ui():
         with gr.Row():
             with gr.Column(scale=3):
                 url_input = gr.Textbox(
-                    placeholder="https://youtube.com/watch?v=…",
-                    label="YouTube URL (required for download stage, ignored otherwise)",
+                    placeholder="https://youtube.com/watch?v=…  or any video URL",
+                    label="Video URL (any site supported by yt-dlp)",
                     lines=1,
                 )
+        with gr.Row():
+            with gr.Column(scale=3):
+                gr.HTML("""
+                <p style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 4px;text-align:center;">
+                — or —
+                </p>
+                """)
+                video_upload_input = gr.File(
+                    label="Upload a video file (mp4, mkv, webm, avi, mov)",
+                    file_types=[".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".ts", ".m4v"],
+                    type="filepath",
+                )
+                gr.HTML("""
+                <p style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:#6a6a8e;margin:4px 0 0;">
+                If both URL and file are provided, the uploaded file takes priority.
+                </p>
+                """)
 
         gr.HTML('<div style="height:12px"></div>')
 
@@ -2941,7 +3098,7 @@ def build_ui():
             <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 16px;line-height:1.7;">
               <strong style="color:#e8e8f0;">large-v3-turbo</strong> — Recommended for most videos.<br>
               Distilled from large-v3: ~8× faster, near-identical accuracy on clean audio.<br>
-              Uses ~3 GB VRAM. Best choice for YouTube videos with clear speech.<br>
+              Uses ~3 GB VRAM. Best choice for videos with clear speech.<br>
               <br>
               <strong style="color:#e8e8f0;">large-v3</strong> — Maximum accuracy.<br>
               Use this when the video has heavy background music, strong accents,<br>
@@ -2957,10 +3114,10 @@ def build_ui():
 
         gr.HTML('<div style="height:8px"></div>')
 
-        with gr.Accordion("🍪 YouTube Account (optional)", open=False):
+        with gr.Accordion("🍪 Browser Cookies (optional, for URL downloads)", open=False):
             gr.HTML("""
             <div style="font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:#9494b2;margin:0 0 16px;line-height:1.7;">
-              Logged-in cookies give yt-dlp access to YouTube's most reliable clients,<br>
+              Logged-in cookies give yt-dlp access to more reliable download clients,<br>
               avoiding PO token errors and JS challenge failures.<br>
               <br>
               <strong style="color:#e8e8f0;">Option A — Browser</strong>: yt-dlp reads cookies directly from a running browser profile.<br>
@@ -3130,7 +3287,7 @@ def build_ui():
         gr.HTML("""
         <div style="text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #2a2a3e;">
           <p style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#3a3a58;">
-            XTTS v2 · Whisper · NLLB-200 / Gemini · yt-dlp · FFmpeg · RTX 4070 Super
+            XTTS v2 · Whisper · NLLB-200 / Gemini · yt-dlp · FFmpeg
           </p>
         </div>
         """)
@@ -3139,6 +3296,7 @@ def build_ui():
             fn=run_pipeline,
             inputs=[
                 url_input,
+                video_upload_input,
                 speaker_input,
                 whisper_model_input,
                 browser_input,

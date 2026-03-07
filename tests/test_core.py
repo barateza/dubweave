@@ -49,6 +49,7 @@ from app import (  # noqa: E402 — must come after stubs
     _srt_timestamp,
     _wrap_subtitle_line,
     validate_youtube_url,
+    validate_video_source,
     validate_openrouter_key,
     validate_google_tts_key,
     PipelineError,
@@ -428,3 +429,54 @@ class TestLog:
         assert len(logs) == 2
         assert "first" in logs[0]
         assert "second" in logs[1]
+
+
+# ===========================================================================
+# validate_video_source
+# ===========================================================================
+
+
+class TestValidateVideoSource:
+    def test_url_only(self):
+        ok, mode = validate_video_source("https://vimeo.com/12345", None)
+        assert ok is True
+        assert mode == "url"
+
+    def test_file_only(self, tmp_path):
+        f = tmp_path / "video.mp4"
+        f.write_bytes(b"fake video data")
+        ok, mode = validate_video_source("", str(f))
+        assert ok is True
+        assert mode == "file"
+
+    def test_both_prefers_file(self, tmp_path):
+        f = tmp_path / "video.mp4"
+        f.write_bytes(b"fake video data")
+        ok, mode = validate_video_source("https://youtube.com/watch?v=dQw4w9WgXcQ", str(f))
+        assert ok is True
+        assert mode == "file"
+
+    def test_neither(self):
+        ok, msg = validate_video_source("", None)
+        assert ok is False
+        assert "No video source" in msg
+
+    def test_whitespace_url(self):
+        ok, msg = validate_video_source("   ", None)
+        assert ok is False
+
+    def test_nonexistent_file(self):
+        ok, mode = validate_video_source("", "/tmp/nonexistent_video_xyz.mp4")
+        assert ok is False
+        assert "No video source" in mode
+
+    def test_any_url_accepted(self):
+        # Non-YouTube URLs should be accepted
+        ok, mode = validate_video_source("https://twitter.com/user/status/123", None)
+        assert ok is True
+        assert mode == "url"
+
+    def test_youtube_url_still_works(self):
+        ok, mode = validate_video_source("https://youtube.com/watch?v=dQw4w9WgXcQ", None)
+        assert ok is True
+        assert mode == "url"
