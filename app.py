@@ -3215,6 +3215,17 @@ def build_ui():
                     label="Google TTS · Voice name",
                     scale=2,
                 )
+                
+                # Dynamic voice sample preview
+                initial_sample_path = os.path.join("samples", f"{_gvoice_default}.wav")
+                google_voice_sample = gr.Audio(
+                    value=initial_sample_path if os.path.exists(initial_sample_path) else None,
+                    label="Sample",
+                    show_label=False,
+                    interactive=False,
+                    scale=1,
+                    elem_id="google-voice-sample",
+                )
 
             def _on_tts_engine_change(engine):
                 is_kokoro = engine == "Kokoro (fast, PT-BR native)"
@@ -3227,18 +3238,35 @@ def build_ui():
                 outputs=[kokoro_voice_input, google_tts_row],
             )
 
+            def _update_google_voice_sample(voice_name):
+                if not voice_name:
+                    return None
+                sample_path = os.path.join("samples", f"{voice_name}.wav")
+                if os.path.exists(sample_path):
+                    return sample_path
+                return None
+
             def _on_google_voice_type_change(voice_type):
                 voices = list(GOOGLE_TTS_VOICE_CATALOG.get(voice_type, []))
                 if not voices:
                     # Polyglot (Preview) or unknown — fall back to env-configured name
                     env_name = GOOGLE_TTS_VOICE_NAME or "pt-BR-Neural2-A"
                     voices = [env_name]
-                return gr.update(choices=voices, value=voices[0])
+                
+                new_voice = voices[0]
+                new_sample = _update_google_voice_sample(new_voice)
+                return gr.update(choices=voices, value=new_voice), new_sample
 
             google_voice_type_input.change(
                 fn=_on_google_voice_type_change,
                 inputs=[google_voice_type_input],
-                outputs=[google_voice_input],
+                outputs=[google_voice_input, google_voice_sample],
+            )
+
+            google_voice_input.change(
+                fn=_update_google_voice_sample,
+                inputs=[google_voice_input],
+                outputs=[google_voice_sample],
             )
 
         gr.HTML('<div style="height:16px"></div>')

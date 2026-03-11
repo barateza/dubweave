@@ -11,7 +11,7 @@
 
 Establishes the baseline: users can install, configs are validated at startup.
 
-```
+``` text
 T1 → T2 → T3 → T4
 ```
 
@@ -19,7 +19,7 @@ T1 → T2 → T3 → T4
 
 Error handling, security, and performance improvements — independent concerns.
 
-```
+``` text
       ┌→ T5 ─┐
 T4 ───┼→ T6 ─┼──→ T11
       ├→ T7 ─┤
@@ -30,7 +30,7 @@ T4 ───┼→ T6 ─┼──→ T11
 
 Tests validate the hardened code from Phase 2.
 
-```
+``` text
 T9 → T10
 ```
 
@@ -38,7 +38,7 @@ T9 → T10
 
 Structured logging wraps around everything.
 
-```
+``` text
 T11 → T12
 ```
 
