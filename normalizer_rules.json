@@ -35,7 +35,6 @@
     {"pattern": "\\bcasas de banho\\b","replacement":"banheiros",  "note": "vocab"},
     {"pattern": "\\bpropriamente\\b", "replacement": "corretamente","note": "vocab"},
     {"pattern": "\\bapenas\\b",       "replacement": "só",         "note": "vocab"},
-    {"pattern": "\\bsomente\\b",      "replacement": "só",         "note": "vocab"},
     {"pattern": "\\bimensamente\\b",  "replacement": "muito",      "note": "vocab"},
     {"pattern": "\\bimenso\\b",       "replacement": "enorme",     "note": "vocab"},
     {
