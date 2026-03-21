@@ -1,13 +1,16 @@
 """
-benchmark.py — Dubweave autoresearch Loop 1
--------------------------------------------
+benchmark.py — Dubweave autoresearch Loop 1 v2
+-----------------------------------------------
 Evaluates a merge_config.json against the fixed Whisper corpus and logs
 a composite score to results.tsv.
+
+v2 additions: gap_sec parameter threading + updated TSV schema.
 
 Usage:
     pixi run python benchmark.py                  # score current config
     pixi run python benchmark.py --baseline       # record as BASELINE row
-    pixi run python benchmark.py --status         # print last 5 results
+    pixi run python benchmark.py --status         # print last 10 results
+    pixi run python benchmark.py --sweep          # dry-run gap_sec values and exit
 
 The agent edits merge_config.json, then calls:
     pixi run python benchmark.py
@@ -100,9 +103,12 @@ def score_corpus(config: dict) -> dict:
     max_words   = int(config.get("max_words",   40))
     max_dur     = config.get("max_duration")        # None or float
     chars_sec   = float(config.get("chars_per_sec", 14.5))
+    gap_sec     = config.get("gap_sec")             # None or float  ← NEW
 
     if max_dur is not None:
         max_dur = float(max_dur)
+    if gap_sec is not None:
+        gap_sec = float(gap_sec)
 
     fit_n = boundary_n = sweet_n = over_n = total_n = 0
 
@@ -120,6 +126,7 @@ def score_corpus(config: dict) -> dict:
             min_words=min_words,
             max_words=max_words,
             max_duration=max_dur,
+            gap_sec=gap_sec,        # ← NEW
         )
 
         for seg in merged:
@@ -160,25 +167,27 @@ _TSV_FIELDS = [
     "timestamp", "status", "S",
     "fit", "boundary", "sweet", "over", "n_segs",
     "min_words", "max_words", "max_duration", "chars_per_sec",
+    "gap_sec",           # ← NEW column (null when unused)
     "description",
 ]
 
 
 def log_result(config: dict, scores: dict, status: str, description: str = "") -> None:
     row = {
-        "timestamp":   datetime.datetime.now().isoformat(timespec="seconds"),
-        "status":      status,
-        "S":           scores["S"],
-        "fit":         scores["fit"],
-        "boundary":    scores["boundary"],
-        "sweet":       scores["sweet"],
-        "over":        scores["over"],
-        "n_segs":      scores["n_segs"],
-        "min_words":   config.get("min_words",    4),
-        "max_words":   config.get("max_words",    40),
+        "timestamp":    datetime.datetime.now().isoformat(timespec="seconds"),
+        "status":       status,
+        "S":            scores["S"],
+        "fit":          scores["fit"],
+        "boundary":     scores["boundary"],
+        "sweet":        scores["sweet"],
+        "over":         scores["over"],
+        "n_segs":       scores["n_segs"],
+        "min_words":    config.get("min_words",    4),
+        "max_words":    config.get("max_words",    40),
         "max_duration": config.get("max_duration", "null"),
         "chars_per_sec": config.get("chars_per_sec", 14.5),
-        "description": description or "",
+        "gap_sec":      config.get("gap_sec", "null"),   # ← NEW
+        "description":  description or "",
     }
     write_header = not RESULTS_PATH.exists() or RESULTS_PATH.stat().st_size == 0
     with open(RESULTS_PATH, "a", newline="", encoding="utf-8") as f:
@@ -205,22 +214,46 @@ def read_best_S() -> float | None:
     return best
 
 
-def print_last(n: int = 5) -> None:
+def print_last(n: int = 10) -> None:
     if not RESULTS_PATH.exists():
         print("No results.tsv yet.")
         return
     with open(RESULTS_PATH, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     for row in rows[-n:]:
+        gap = row.get("gap_sec", "null")
         print(
             f"[{row['timestamp']}] {row['status']:8s} "
             f"S={row['S']:7s}  fit={row['fit']}  boundary={row['boundary']}  "
             f"sweet={row['sweet']}  over={row['over']}  "
             f"n={row['n_segs']}  "
             f"min_w={row['min_words']} max_w={row['max_words']} "
-            f"max_dur={row['max_duration']}  "
+            f"max_dur={row['max_duration']}  gap={gap}  "
             f"{row.get('description', '')}"
         )
+
+
+def run_sweep() -> None:
+    """
+    Print a quick preview table of gap_sec candidates without logging.
+    Useful for sanity-checking the implementation before the agent starts.
+    """
+    import json as _json
+    base_config = _json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    candidates = [None, 0.3, 0.5, 0.7, 1.0, 1.2, 1.5, 2.0]
+
+    print(f"\n{'gap_sec':>10}  {'S':>8}  {'fit':>6}  {'boundary':>8}  {'sweet':>6}  {'over':>6}  {'n_segs':>7}")
+    print("-" * 68)
+    for g in candidates:
+        cfg = {**base_config, "gap_sec": g}
+        sc  = score_corpus(cfg)
+        label = "null" if g is None else f"{g:.1f}"
+        print(
+            f"{label:>10}  {sc['S']:>8.5f}  {sc['fit']:>6.4f}  "
+            f"{sc['boundary']:>8.4f}  {sc['sweet']:>6.4f}  "
+            f"{sc['over']:>6.4f}  {sc['n_segs']:>7}"
+        )
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +263,7 @@ def print_last(n: int = 5) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Dubweave Loop 1 benchmark — score merge_config.json"
+        description="Dubweave Loop 1 v2 benchmark — score merge_config.json"
     )
     parser.add_argument(
         "--baseline",
@@ -240,7 +273,12 @@ def main() -> None:
     parser.add_argument(
         "--status",
         action="store_true",
-        help="Print the last 5 results and exit",
+        help="Print the last 10 results and exit",
+    )
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Preview gap_sec candidates without logging — sanity check only",
     )
     parser.add_argument(
         "--description", "-d",
@@ -259,6 +297,10 @@ def main() -> None:
         sys.exit(1)
 
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+
+    if args.sweep:
+        run_sweep()
+        return
 
     # Score
     print(f"Scoring corpus ({CORPUS_DIR})…")
@@ -283,6 +325,7 @@ def main() -> None:
     log_result(config, scores, status, description=args.description)
 
     # Print
+    gap_label = config.get("gap_sec", "null")
     print(
         f"\n  S          = {scores['S']:.5f}"
         f"  {'← NEW BEST' if status == 'KEEP' else ''}"
@@ -292,6 +335,7 @@ def main() -> None:
     print(f"  sweet      = {scores['sweet']:.4f}   (γ={W_SWEET})")
     print(f"  over       = {scores['over']:.4f}   (δ={W_OVER}, subtracted)")
     print(f"  n_segs     = {scores['n_segs']}  across {scores['n_files']} files")
+    print(f"  gap_sec    = {gap_label}")
     print(f"\n  status     = {status}")
     if status == "DISCARD":
         best = read_best_S()

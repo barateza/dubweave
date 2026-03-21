@@ -1156,91 +1156,79 @@ def _merge_segments(
     *,
     min_words: int = 4,
     max_words: int = 40,
-    gap_sec: float | None = None,   # reserved for future gap-aware merging
-    max_duration: float | None = None,  # reserved: hard cap on merged duration
+    gap_sec: float | None = None,
+    max_duration: float | None = None,
 ) -> list:
+    """Merge raw Whisper segments into translation utterances.
+
+    Flush conditions (in priority order):
+      1. gap_sec     — long silence before next segment → force flush NOW
+                       (fires *before* appending the new segment, so the
+                        silent boundary lands between utterances, not inside)
+      2. max_words   — hard word-count cap → flush after appending
+      3. max_duration — accumulated duration cap → flush after appending
+      4. min_words + sentence punctuation → soft flush after appending
+
+    gap_sec interaction with min_words
+    ------------------------------------
+    A gap flush is unconditional: it fires even if the buffer has fewer than
+    min_words words. This is intentional — a long silence IS a sentence
+    boundary regardless of how many words preceded it (e.g. a short "Yes."
+    followed by 1.5 s of silence should flush). If you want a minimum word
+    guard on gap flushes, add `gap_min_words` in a future iteration.
     """
-    Merge short/incomplete Whisper segments into utterance-sized units.
- 
-    Whisper segments are acoustic boundaries, not semantic ones. Short segments
-    (< min_words words) and segments without terminal punctuation are mid-utterance
-    fragments. Translating them in isolation loses context and produces broken
-    output. We merge them into utterances, translate the utterances, then
-    re-expand back to original segment granularity by duration proportion.
- 
-    Parameters
-    ----------
-    segments     : raw Whisper segment list [{start, end, text}, ...]
-    min_words    : minimum word count before a terminal-punctuated segment is
-                   allowed to flush. Default 4 matches the original behaviour.
-    max_words    : hard flush threshold regardless of punctuation. Default 40.
-    gap_sec      : (future) max silence gap in seconds before forcing a flush.
-                   Currently unused; accepted so benchmark.py can pass it.
-    max_duration : (future) max merged duration in seconds before forcing a flush.
-                   Currently unused; accepted so benchmark.py can pass it.
- 
-    Returns
-    -------
-    merged : list of {start, end, text, children: [original indices]}
-    """
-    import re
- 
-    TERMINAL = re.compile(r"[.!?]$")
- 
-    merged = []
-    current_text = ""
-    current_start = None
-    current_children: list[int] = []
- 
-    for i, seg in enumerate(segments):
-        text = seg["text"].strip()
-        if not text:
+    if not segments:
+        return []
+
+    _SENTENCE_ENDINGS = frozenset('.?!…—"\'')
+
+    merged: list = []
+    buf: list = []          # segments being accumulated into current utterance
+
+    def _flush() -> None:
+        if not buf:
+            return
+        merged.append({
+            "start": buf[0]["start"],
+            "end":   buf[-1]["end"],
+            "text":  " ".join(s["text"].strip() for s in buf),
+        })
+        buf.clear()
+
+    for seg in segments:
+        # ── Priority 1: gap flush ──────────────────────────────────────────
+        # Check BEFORE appending so the gap boundary falls between utterances.
+        if gap_sec is not None and buf:
+            silence = seg["start"] - buf[-1]["end"]
+            if silence >= gap_sec:
+                _flush()
+
+        buf.append(seg)
+
+        # Running stats on the current buffer
+        combined_text  = " ".join(s["text"].strip() for s in buf)
+        word_count     = len(combined_text.split())
+        duration       = buf[-1]["end"] - buf[0]["start"]
+        ends_sentence  = (
+            bool(combined_text.rstrip())
+            and combined_text.rstrip()[-1] in _SENTENCE_ENDINGS
+        )
+
+        # ── Priority 2: hard word-count cap ───────────────────────────────
+        if word_count >= max_words:
+            _flush()
             continue
- 
-        if current_start is None:
-            current_start = seg["start"]
- 
-        current_text = (current_text + " " + text).strip()
-        current_children.append(i)
- 
-        word_count = len(current_text.split())
-        has_terminal = bool(TERMINAL.search(current_text))
- 
-        # Optional duration guard (active when max_duration is supplied)
-        current_dur = seg["end"] - current_start
-        duration_exceeded = (
-            max_duration is not None and current_dur >= max_duration
-        )
- 
-        # Flush if:
-        #   • terminal punctuation AND enough words, OR
-        #   • word count hard cap, OR
-        #   • duration hard cap (when supplied by benchmark)
-        if (has_terminal and word_count >= min_words) or word_count >= max_words or duration_exceeded:
-            merged.append(
-                {
-                    "start": current_start,
-                    "end": seg["end"],
-                    "text": current_text,
-                    "children": current_children[:],
-                }
-            )
-            current_text = ""
-            current_start = None
-            current_children = []
- 
-    # Flush any trailing fragment
-    if current_text:
-        last_end = segments[current_children[-1]]["end"]
-        merged.append(
-            {
-                "start": current_start,
-                "end": last_end,
-                "text": current_text,
-                "children": current_children[:],
-            }
-        )
- 
+
+        # ── Priority 3: duration cap ──────────────────────────────────────
+        if max_duration is not None and duration >= max_duration:
+            _flush()
+            continue
+
+        # ── Priority 4: soft flush on sentence boundary ───────────────────
+        if word_count >= min_words and ends_sentence:
+            _flush()
+
+    _flush()   # drain any remaining buffer
     return merged
 
 
