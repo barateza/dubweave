@@ -1,7 +1,7 @@
 {
   "min_words": 8,
-  "max_words": 50,
+  "max_words": 100,
   "max_duration": null,
   "chars_per_sec": 25.0,
-  "gap_sec": null
+  "gap_sec": 3.0
 }

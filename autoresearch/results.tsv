@@ -38,3 +38,22 @@ timestamp	status	S	fit	boundary	sweet	over	n_segs	min_words	max_words	max_durati
 2026-03-21T15:51:51	DISCARD	0.79134	0.9789	0.9102	0.6983	0.0236	2327	8	50	8.5	25.0	max_duration=8.5: hypothesis: avoid extreme overlong segments
 2026-03-21T15:52:00	DISCARD	0.79534	0.9788	0.9225	0.7029	0.0251	2309	8	50	9.0	25.0	max_duration=9.0: hypothesis: slightly looser cap than 8.5
 2026-03-21T15:52:18	DISCARD	0.79521	0.9715	0.9715	0.677	0.055	2455	6	35		25.0	min_words=6+max_words=35: combo hypothesis
+2026-03-21T19:44:01	BASELINE	0.80932	0.9777	0.9882	0.7135	0.0719	2199	8	50		25.0		Loop 1 v2 baseline: gap_sec=null, inherits v1 best
+2026-03-21T19:44:10	KEEP	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	gap_sec=2.0: hypothesis: large gap respects paragraph breaks and increases sweet without harming boundary
+2026-03-21T19:44:48	DISCARD	0.79889	0.9704	0.9889	0.6782	0.0604	2433	6	50		25.0	2.0	gap_sec=2.0, min_words=6: hypothesis: relaxed floor coalesces punctuated fragments and improves sweet
+2026-03-21T19:45:14	DISCARD	0.80656	0.9739	0.9884	0.7055	0.0647	2333	7	50		25.0	2.0	gap_sec=2.0, min_words=7: hypothesis: slight lowering of floor merges useful fragments, improving sweet without harming boundary
+2026-03-21T19:45:33	DISCARD	0.80916	0.977	0.9874	0.7132	0.068	2221	8	50		25.0	1.5	gap_sec=1.5, min_words=8: hypothesis: slightly weaker gap retains beneficial merges while keeping sweet high
+2026-03-21T19:45:48	KEEP	0.80973	0.977	0.9874	0.7159	0.0687	2214	8	50		25.0	3.0	gap_sec=3.0, min_words=8: hypothesis: larger gap further improves sweet by honoring broader paragraph breaks
+2026-03-21T19:46:20	DISCARD	0.7992	0.9703	0.9889	0.6796	0.0605	2428	6	50		25.0	3.0	gap_sec=3.0, min_words=6: hypothesis: with larger gap, relaxed floor may further improve sweet
+2026-03-21T19:46:40	DISCARD	0.80689	0.9738	0.9884	0.707	0.0649	2328	7	50		25.0	3.0	gap_sec=3.0, min_words=7: hypothesis: slight lowering of floor under large gap may coalesce useful fragments
+2026-03-21T19:47:00	DISCARD	0.80838	0.9851	0.9856	0.7056	0.0845	2011	10	50		25.0	3.0	gap_sec=3.0, min_words=10: hypothesis: tighter floor may reduce over and keep boundary while preserving sweet
+2026-03-21T19:47:24	DISCARD	0.80885	0.977	0.9838	0.7158	0.0685	2220	8	45		25.0	3.0	gap_sec=3.0, max_words=45: hypothesis: slightly tighter max_words reduces run-ons while preserving sweet
+2026-03-21T19:47:43	KEEP	0.81097	0.9769	0.9918	0.7164	0.0684	2207	8	55		25.0	3.0	gap_sec=3.0, max_words=55: hypothesis: relaxing max_words allows longer merges with gap guard, improving sweet
+2026-03-21T19:48:09	DISCARD	0.81097	0.9769	0.9918	0.7164	0.0684	2207	8	55		25.0	2.9	gap_sec=2.9: hypothesis: slight reduction preserves sweet while improving boundary fit
+2026-03-21T19:48:25	DISCARD	0.8108	0.9769	0.9918	0.716	0.069	2204	8	55		25.0	3.1	gap_sec=3.1: hypothesis: slight increase may capture wider paragraph breaks and improve sweet
+2026-03-21T19:52:40	KEEP	0.81155	0.9768	0.9946	0.7163	0.069	2203	8	60		25.0	3.0	gap_sec=3.0, max_words=60: hypothesis: trend continues — allowing longer merges increases sweet and S
+2026-03-21T19:53:17	KEEP	0.81212	0.9768	0.9968	0.7162	0.0687	2199	8	65		25.0	3.0	gap_sec=3.0, max_words=65: hypothesis: trend continues further — allow even longer merges to boost sweet
+2026-03-21T19:54:01	DISCARD	0.8106	0.9777	0.9927	0.7141	0.0716	2193	8	55		25.0		validation: max_words=55, gap_sec=null — hypothesis: if S unchanged, gap_sec was redundant at max=55
+2026-03-21T19:59:48	KEEP	0.81215	0.9768	0.9973	0.7161	0.0692	2198	8	70		25.0	3.0	gap_sec=3.0, max_words=70: hypothesis: push max_words to 70 to see if S continues to climb or boundary flattens
+2026-03-21T20:00:06	KEEP	0.81243	0.9768	0.9982	0.716	0.0683	2197	8	80		25.0	3.0	gap_sec=3.0, max_words=80: hypothesis: push to 80 to find rollover where boundary flattens and over rises
+2026-03-21T20:06:37	KEEP	0.81265	0.9768	0.9986	0.7164	0.0683	2197	8	100		25.0	3.0	gap_sec=3.0, max_words=100: hypothesis: push max_words to 100 to find structural limit
