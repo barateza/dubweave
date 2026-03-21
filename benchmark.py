@@ -258,7 +258,7 @@ def main() -> None:
         print(f"ERROR: {CONFIG_PATH} not found. Create it first.", file=sys.stderr)
         sys.exit(1)
 
-    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
 
     # Score
     print(f"Scoring corpus ({CORPUS_DIR})…")

@@ -1095,46 +1095,72 @@ def _translate_openrouter(
 # ── Segment merging ──────────────────────────────────────────────────────────
 
 
-def _merge_segments(segments: list) -> list:
+def _merge_segments(
+    segments: list,
+    *,
+    min_words: int = 4,
+    max_words: int = 40,
+    gap_sec: float | None = None,   # reserved for future gap-aware merging
+    max_duration: float | None = None,  # reserved: hard cap on merged duration
+) -> list:
     """
     Merge short/incomplete Whisper segments into utterance-sized units.
-
+ 
     Whisper segments are acoustic boundaries, not semantic ones. Short segments
-    (< 4 words) and segments without terminal punctuation are mid-utterance
+    (< min_words words) and segments without terminal punctuation are mid-utterance
     fragments. Translating them in isolation loses context and produces broken
     output. We merge them into utterances, translate the utterances, then
     re-expand back to original segment granularity by duration proportion.
-
-    Returns:
-        merged   — list of {start, end, text, children: [original indices]}
-        index_map — merged_idx → [original_seg_indices]
+ 
+    Parameters
+    ----------
+    segments     : raw Whisper segment list [{start, end, text}, ...]
+    min_words    : minimum word count before a terminal-punctuated segment is
+                   allowed to flush. Default 4 matches the original behaviour.
+    max_words    : hard flush threshold regardless of punctuation. Default 40.
+    gap_sec      : (future) max silence gap in seconds before forcing a flush.
+                   Currently unused; accepted so benchmark.py can pass it.
+    max_duration : (future) max merged duration in seconds before forcing a flush.
+                   Currently unused; accepted so benchmark.py can pass it.
+ 
+    Returns
+    -------
+    merged : list of {start, end, text, children: [original indices]}
     """
     import re
-
+ 
     TERMINAL = re.compile(r"[.!?]$")
-    MIN_WORDS = 4
-
+ 
     merged = []
     current_text = ""
     current_start = None
-    current_children = []
-
+    current_children: list[int] = []
+ 
     for i, seg in enumerate(segments):
         text = seg["text"].strip()
         if not text:
             continue
-
+ 
         if current_start is None:
             current_start = seg["start"]
-
+ 
         current_text = (current_text + " " + text).strip()
         current_children.append(i)
-
+ 
         word_count = len(current_text.split())
         has_terminal = bool(TERMINAL.search(current_text))
-
-        # Flush if: terminal punctuation AND enough words, or too long (safety)
-        if (has_terminal and word_count >= MIN_WORDS) or word_count >= 40:
+ 
+        # Optional duration guard (active when max_duration is supplied)
+        current_dur = seg["end"] - current_start
+        duration_exceeded = (
+            max_duration is not None and current_dur >= max_duration
+        )
+ 
+        # Flush if:
+        #   • terminal punctuation AND enough words, OR
+        #   • word count hard cap, OR
+        #   • duration hard cap (when supplied by benchmark)
+        if (has_terminal and word_count >= min_words) or word_count >= max_words or duration_exceeded:
             merged.append(
                 {
                     "start": current_start,
@@ -1146,7 +1172,7 @@ def _merge_segments(segments: list) -> list:
             current_text = ""
             current_start = None
             current_children = []
-
+ 
     # Flush any trailing fragment
     if current_text:
         last_end = segments[current_children[-1]]["end"]
@@ -1158,7 +1184,7 @@ def _merge_segments(segments: list) -> list:
                 "children": current_children[:],
             }
         )
-
+ 
     return merged
 
 
@@ -1315,7 +1341,7 @@ def translate_segments(
 # XTTS v2 synthesizes Portuguese at roughly this many characters per second
 # at natural speaking rate. Measured empirically on a range of texts.
 # Used to estimate output duration from character count before synthesis.
-XTTS_CHARS_PER_SEC = 18.0  # conservative estimate; real range is 15–22
+XTTS_CHARS_PER_SEC = 25.0  # actual estimate is 22-28 cps depending on text, but we want a conservative upper bound for safety
 
 # PT-BR is structurally ~15% longer than English in character count after
 # translation (more syllables, obligatory pronouns, verbal inflection).
