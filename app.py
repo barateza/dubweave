@@ -878,7 +878,55 @@ _PTPT_TO_PTBR = [
 def _ptpt_to_ptbr(text: str) -> str:
     """Apply PT-PT → PT-BR lexical substitutions."""
     import re
+    from pathlib import Path
 
+    # Prefer canonical rules file when present
+    rules_path = Path(__file__).parent / "normalizer_rules.json"
+    if rules_path.exists():
+        try:
+            cfg = json.loads(rules_path.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+        rules = cfg.get("rules", [])
+
+        for rule in rules:
+            if rule.get("type") == "gerund":
+                verbs = rule.get("verbs", [])
+                if not verbs:
+                    continue
+                verb_pattern = "|".join(re.escape(v) for v in verbs)
+                pattern = rf"\ba ({verb_pattern})\b"
+
+                def _replace_gerund(m: re.Match[str]) -> str:
+                    v = m.group(1)
+                    if v.endswith("ar"):
+                        return v[:-2] + "ando"
+                    if v.endswith("er"):
+                        return v[:-2] + "endo"
+                    if v.endswith("ir"):
+                        return v[:-2] + "indo"
+                    return v + "ndo"
+
+                text = str(re.sub(pattern, _replace_gerund, text, flags=re.IGNORECASE))
+            else:
+                pattern = rule.get("pattern")
+                replacement = rule.get("replacement")
+                if not pattern:
+                    continue
+
+                def _replace_preserve_case(m: re.Match[str], repl: str = replacement) -> str:
+                    if m.group(0) and m.group(0)[0].isupper():
+                        return repl[0].upper() + repl[1:]
+                    return repl
+
+                try:
+                    text = str(re.sub(pattern, _replace_preserve_case, text, flags=re.IGNORECASE))
+                except re.error:
+                    # If the pattern from JSON is invalid, skip it gracefully
+                    continue
+        return text
+
+    # Fallback: use hardcoded tuple list
     for pattern, replacement in _PTPT_TO_PTBR:
         if callable(replacement):
             text = str(
