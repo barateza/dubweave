@@ -1,0 +1,18 @@
+timestamp	status	S	detection_rate	perfect_rate	fp_rate	n_inject	n_clean	n_rules	description
+2026-03-21T18:08:52	BASELINE	0.9075	0.92	0.3	0.025	50	200	37	original 30-rule set
+2026-03-21T18:09:08	DISCARD	0.9075	0.92	0.3	0.025	50	200	37	diagnostic
+2026-03-21T19:00:42	DISCARD	0.9075	0.92	0.3	0.025	50	200	38	exp#1 add_apanhar_pegar
+2026-03-21T19:00:42	DISCARD	0.9075	0.92	0.32	0.025	50	200	38	exp#2 add_conduzir_dirigir
+2026-03-21T19:00:42	DISCARD	0.9075	0.92	0.3	0.025	50	200	38	exp#3 add_frigorifico_geladeira
+2026-03-21T19:00:42	DISCARD	0.9075	0.92	0.3	0.025	50	200	38	exp#4 add_pequeno-almoco
+2026-03-21T19:00:43	DISCARD	0.9075	0.92	0.3	0.025	50	200	38	exp#5 add_talho_acougue
+2026-03-21T19:03:13	DISCARD	0.9075	0.92	0.3	0.025	50	200	37	diagnostic
+2026-03-21T19:04:55	DISCARD	0.9075	0.92	0.3	0.025	50	200	37	diagnostic
+2026-03-21T19:05:23	KEEP	0.9675	0.98	0.32	0.025	50	200	37	add discutir to gerund verbs
+2026-03-21T19:05:48	KEEP	0.9875	1.0	0.32	0.025	50	200	38	add percebeste->entendeu
+2026-03-21T19:05:58	DISCARD	0.9875	1.0	0.32	0.025	50	200	38	post-fixes diagnostic
+2026-03-21T19:07:01	KEEP	0.99	1.0	0.3	0.02	50	200	37	remove somente->só rule
+2026-03-21T19:07:19	KEEP	0.995	1.0	0.3	0.01	50	200	36	remove apenas->só rule
+2026-03-21T19:07:41	DISCARD	0.9775	0.98	0.28	0.005	50	200	35	remove giro->bonito rule
+2026-03-21T19:08:28	KEEP	0.9975	1.0	0.3	0.005	50	200	36	remove fazer from gerund verbs to avoid FP
+2026-03-21T19:08:57	KEEP	1.0	1.0	0.3	0.0	50	200	36	refine giro rule to avoid 'capital de giro'

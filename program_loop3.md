@@ -19,7 +19,7 @@ whether to keep or discard.
 `pixi run python benchmark_loop3.py -d "<your hypothesis>"` scores the current
 rule set against two corpora and prints composite score S.
 
-```
+```text
 S = detection_rate - 0.50 * false_positive_rate
 ```
 
@@ -157,7 +157,7 @@ pixi run python benchmark_loop3.py --baseline -d "original 30-rule set"
 
 Also ensure the clean corpus file exists:
 
-```
+```text
 corpus/ptbr_clean_corpus.txt
 ```
 
