@@ -184,3 +184,4 @@ cython_debug/
 
 /projects
 /samples
+corpus/*_whisper.json
