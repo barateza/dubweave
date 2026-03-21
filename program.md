@@ -54,7 +54,7 @@ S = 0.80699  →  min_words=8, max_words=40, max_duration=null, chars_per_sec=25
 
 Known from manual sweep:
 
-- chars_per_sec is calibrated. Do not touch it.
+- chars_per_sec: Kokoro speech rate for timing prediction. LOCKED at 25.0 — do not change.
 - min_words=12 → over spikes, boundary drops → DISCARD
 - max_words=30, 35 → boundary drops → DISCARD
 - max_duration=7.0, 10.0 → boundary drops → DISCARD

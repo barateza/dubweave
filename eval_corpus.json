@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "english": "You need to make eye contact with your audience.",
+    "reference": "Você precisa fazer contato visual com seu público.",
+    "tags": ["voce_paradigm", "imperative_tone"]
+  },
+  {
+    "id": 2,
+    "english": "She was looking at the screen while talking.",
+    "reference": "Ela estava olhando para a tela enquanto falava.",
+    "tags": ["gerund", "ptbr_gerund_vs_ptpt"]
+  },
+  {
+    "id": 3,
+    "english": "Take the bus to the city center.",
+    "reference": "Pegue o ônibus para o centro da cidade.",
+    "tags": ["vocabulary_onibus", "imperative"]
+  },
+  {
+    "id": 4,
+    "english": "Could you please fill out this form, sir?",
+    "reference": "O senhor poderia preencher este formulário, por favor?",
+    "tags": ["formal_register", "question", "voce_paradigm"]
+  },
+  {
+    "id": 5,
+    "english": "The database server crashed during the backup process.",
+    "reference": "O servidor de banco de dados travou durante o processo de backup.",
+    "tags": ["technical"]
+  },
+  {
+    "id": 6,
+    "english": "Do you guys want to grab some coffee?",
+    "reference": "Vocês querem tomar um café?",
+    "tags": ["voce_paradigm_plural", "question", "informal_register"]
+  },
+  {
+    "id": 7,
+    "english": "The manager told the employees that he would review their proposals by Friday.",
+    "reference": "O gerente disse aos funcionários que ele revisaria as propostas deles até sexta-feira.",
+    "tags": ["cross_chunk_pronoun"]
+  },
+  {
+    "id": 8,
+    "english": "I left my cell phone at home.",
+    "reference": "Esqueci meu celular em casa.",
+    "tags": ["vocabulary_celular", "pro_drop"]
+  },
+  {
+    "id": 9,
+    "english": "The children were playing in the park when their mother called them.",
+    "reference": "As crianças estavam brincando no parque quando a mãe delas ligou para elas.",
+    "tags": ["gerund", "cross_chunk_pronoun"]
+  },
+  {
+    "id": 10,
+    "english": "Dude, just send me the files already!",
+    "reference": "Cara, me manda logo os arquivos!",
+    "tags": ["informal_register", "imperative", "clitic_placement"]
+  },
+  {
+    "id": 11,
+    "english": "What is the upload bandwidth of this network?",
+    "reference": "Qual é a largura de banda de upload desta rede?",
+    "tags": ["technical", "question"]
+  },
+  {
+    "id": 12,
+    "english": "You all must submit your assignments before midnight.",
+    "reference": "Vocês devem entregar seus trabalhos antes da meia-noite.",
+    "tags": ["voce_paradigm_plural", "imperative_tone"]
+  },
+  {
+    "id": 13,
+    "english": "The train to São Paulo departs at seven in the morning.",
+    "reference": "O trem para São Paulo parte às sete da manhã.",
+    "tags": ["vocabulary_trem"]
+  },
+  {
+    "id": 14,
+    "english": "Ma'am, would you like me to schedule your appointment?",
+    "reference": "Senhora, a senhora gostaria que eu agendasse sua consulta?",
+    "tags": ["formal_register", "question", "voce_paradigm", "subjunctive"]
+  },
+  {
+    "id": 15,
+    "english": "He is texting on his phone while waiting for the bus.",
+    "reference": "Ele está mandando mensagem no celular enquanto espera o ônibus.",
+    "tags": ["gerund", "vocabulary_celular", "vocabulary_onibus"]
+  },
+  {
+    "id": 16,
+    "english": "The professor told Maria that she should rewrite her thesis because it had too many errors.",
+    "reference": "O professor disse à Maria que ela deveria reescrever a tese dela porque tinha muitos erros.",
+    "tags": ["cross_chunk_pronoun", "gender"]
+  },
+  {
+    "id": 17,
+    "english": "Please restart the virtual machine and check the logs.",
+    "reference": "Por favor, reinicie a máquina virtual e verifique os logs.",
+    "tags": ["imperative", "technical"]
+  },
+  {
+    "id": 18,
+    "english": "Let's hang out downtown this weekend, what do you think?",
+    "reference": "Vamos sair no centro neste fim de semana, o que você acha?",
+    "tags": ["informal_register", "voce_paradigm", "question"]
+  },
+  {
+    "id": 19,
+    "english": "Who told her that they were canceling the project she had been working on?",
+    "reference": "Quem disse a ela que estavam cancelando o projeto no qual ela estava trabalhando?",
+    "tags": ["question", "cross_chunk_pronoun", "gerund"]
+  },
+  {
+    "id": 20,
+    "english": "We have been developing this software for over two years.",
+    "reference": "Estamos desenvolvendo este software há mais de dois anos.",
+    "tags": ["gerund", "ptbr_gerund_vs_ptpt", "technical"]
+  },
+  {
+    "id": 21,
+    "english": "I need to buy a new SIM card for my cell phone before catching the bus to the airport.",
+    "reference": "Preciso comprar um chip novo para meu celular antes de pegar o ônibus para o aeroporto.",
+    "tags": ["vocabulary_celular", "vocabulary_onibus", "pro_drop"]
+  },
+  {
+    "id": 22,
+    "english": "The algorithm processes the data and then sends it to the server, which stores it in the cloud.",
+    "reference": "O algoritmo processa os dados e depois os envia para o servidor, que os armazena na nuvem.",
+    "tags": ["technical", "cross_chunk_pronoun"]
+  },
+  {
+    "id": 23,
+    "english": "Are you coming to the party tonight or not?",
+    "reference": "Você vai à festa hoje à noite ou não?",
+    "tags": ["voce_paradigm", "question"]
+  },
+  {
+    "id": 24,
+    "english": "Please have a seat, sir; the doctor will see you shortly.",
+    "reference": "Por favor, sente-se, senhor; o doutor irá atendê-lo em breve.",
+    "tags": ["formal_register", "imperative", "clitic_placement"]
+  },
+  {
+    "id": 25,
+    "english": "She keeps complaining about everything, you know?",
+    "reference": "Ela fica reclamando de tudo, sabe?",
+    "tags": ["gerund", "ptbr_gerund_vs_ptpt", "informal_register"]
+  },
+  {
+    "id": 26,
+    "english": "Which teacher told the students that their grades would be posted after he finished correcting them?",
+    "reference": "Qual professor disse aos alunos que as notas deles seriam publicadas depois que ele terminasse de corrigi-las?",
+    "tags": ["cross_chunk_pronoun", "question"]
+  },
+  {
+    "id": 27,
+    "english": "Excuse me, where can I catch the bus to the train station?",
+    "reference": "Com licença, onde posso pegar o ônibus para a estação de trem?",
+    "tags": ["vocabulary_onibus", "vocabulary_trem", "question"]
+  },
+  {
+    "id": 28,
+    "english": "The team is running the integration tests while deploying the new API.",
+    "reference": "A equipe está rodando os testes de integração enquanto faz o deploy da nova API.",
+    "tags": ["technical", "gerund"]
+  },
+  {
+    "id": 29,
+    "english": "Turn off your cell phone and pay attention!",
+    "reference": "Desligue seu celular e preste atenção!",
+    "tags": ["imperative", "vocabulary_celular"]
+  },
+  {
+    "id": 30,
+    "english": "If you had told us earlier, we would have taken the earlier train instead of waiting for the bus.",
+    "reference": "Se você tivesse nos avisado antes, teríamos pegado o trem mais cedo em vez de esperar o ônibus.",
+    "tags": ["voce_paradigm", "vocabulary_trem", "vocabulary_onibus", "conditional", "cross_chunk_pronoun"]
+  }
+]

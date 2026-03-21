@@ -946,19 +946,27 @@ def _translate_nllb(texts: list[str], logs: list) -> tuple[list[str], list]:
 
 # ── OpenRouter translation (fallback) ─────────────────────────────────────────
 
-SYSTEM_PROMPT = (
-    "You are a professional translator specialising in Brazilian Portuguese (PT-BR). "
-    "CRITICAL RULES:\n"
-    "1. Output ONLY in Brazilian Portuguese (PT-BR). NEVER use European Portuguese (PT-PT).\n"
-    "2. Use 'voce' for second person singular. NEVER use 'tu', 'teu', 'tua', 'vos'.\n"
-    "3. Use gerund forms: 'estao fazendo', 'estou vendo'. NEVER use 'estao a fazer', 'estou a ver'.\n"
-    "4. Use Brazilian vocabulary: 'onibus' not 'autocarro', 'celular' not 'telemovel', "
-    "'trem' not 'comboio', 'banheiro' not 'casa de banho', 'legal' not 'fixe', "
-    "'criancas' not 'miudos', 'entender' not 'perceber' (when meaning to understand).\n"
-    "5. Use 3rd person verb conjugations with 'voce': 'voce esta' not 'voce estas'.\n"
-    "6. Keep informal, conversational register as in the original.\n"
-    "7. Preserve all punctuation and segment numbering exactly."
-)
+def _load_system_prompt() -> str:
+    """Load translation system prompt from file, fall back to hardcoded default."""
+    prompt_path = Path(__file__).parent / "translation_prompt.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding="utf-8").strip()
+    # Hardcoded fallback — only used if translation_prompt.md is missing
+    return (
+        "You are a professional translator specialising in Brazilian Portuguese (PT-BR). "
+        "CRITICAL RULES:\n"
+        "1. Output ONLY in Brazilian Portuguese (PT-BR). NEVER use European Portuguese (PT-PT).\n"
+        "2. Use 'voce' for second person singular. NEVER use 'tu', 'teu', 'tua', 'vos'.\n"
+        "3. Use gerund forms: 'estao fazendo', 'estou vendo'. NEVER use 'estao a fazer', 'estou a ver'.\n"
+        "4. Use Brazilian vocabulary: 'onibus' not 'autocarro', 'celular' not 'telemovel', "
+        "'trem' not 'comboio', 'banheiro' not 'casa de banho', 'legal' not 'fixe', "
+        "'criancas' not 'miudos', 'entender' not 'perceber' (when meaning to understand).\n"
+        "5. Use 3rd person verb conjugations with 'voce': 'voce esta' not 'voce estas'.\n"
+        "6. Keep informal, conversational register as in the original.\n"
+        "7. Preserve all punctuation and segment numbering exactly."
+    )
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 
 def _call_openrouter(
