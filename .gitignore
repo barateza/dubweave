@@ -183,3 +183,4 @@ cython_debug/
 .pixi/
 
 /projects
+/samples
