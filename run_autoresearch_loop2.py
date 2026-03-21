@@ -22,14 +22,88 @@ BENCH = [sys.executable, str(ROOT / "benchmark_loop2.py")]
 MAX_EXPERIMENTS = 40
 MAX_DISCARD_STREAK = 5
 
+import re
+
+
+def replace_rule_block(text: str, rule_num: int, new_block: str) -> str:
+    """Replace numbered rule `rule_num` block with `new_block` preserving surrounding structure."""
+    lines = text.splitlines()
+    start = None
+    end = None
+    pattern = re.compile(rf"^{rule_num}\.\s")
+    next_pattern = re.compile(r"^\d+\.\s")
+    for i, ln in enumerate(lines):
+        if start is None and pattern.match(ln):
+            start = i
+            continue
+        if start is not None and i > start and next_pattern.match(ln):
+            end = i
+            break
+    if start is None:
+        return text
+    if end is None:
+        end = len(lines)
+    new_lines = lines[:start] + new_block.strip().splitlines() + lines[end:]
+    return "\n".join(new_lines) + "\n"
+
+
+def mut_refine_voce(text: str) -> str:
+    block = (
+        "2. Always use 'você' for second person singular. NEVER use 'tu', 'teu', 'tua', 'vós'.\n"
+        "   - CORRECT: 'Você fez isso' / 'Você está bem?'\n"
+        "   - WRONG:   'Tu fizeste isso' / 'Tu estás bem?'\n"
+        "   - NOTE: When the source uses informal contractions, keep informal register but still use 'você' forms.\n"
+        "   - NEGATIVE EXAMPLES (NEVER): avoid 'tu', avoid 'teu/tua' except for quoted dialectal speech.\n"
+    )
+    return replace_rule_block(text, 2, block)
+
+
+def mut_refine_gerund(text: str) -> str:
+    block = (
+        "3. Use gerund forms for ongoing actions in PT-BR. NEVER use European infinitive constructions except in literal quotations.\n"
+        "   - CORRECT: 'estou fazendo', 'ele está vendo', 'fica reclamando'\n"
+        "   - WRONG:   'estou a fazer', 'ele está a ver', 'fica a reclamar'\n"
+        "   - EXCEPTIONS: For certain stative verbs or idioms where PT-BR prefers infinitive, follow natural usage (examples in later section).\n"
+    )
+    return replace_rule_block(text, 3, block)
+
+
+def mut_refine_vocab(text: str) -> str:
+    block = (
+        "4. Use Brazilian vocabulary and provide explicit negative examples.\n"
+        "   - PREFERRED: 'ônibus' not 'autocarro'; 'celular' not 'telemóvel'; 'trem' not 'comboio'; 'banheiro' not 'casa de banho'\n"
+        "   - NEGATIVE EXAMPLES (NEVER): do NOT use 'autocarro','telemóvel','miúdos','fixe' unless quoting PT-PT.\n"
+        "   - CONTEXT: If the source implies a regional term, prefer the neutral PT-BR equivalent.\n"
+    )
+    return replace_rule_block(text, 4, block)
+
+
+def mut_refine_register(text: str) -> str:
+    block = (
+        "6. Register: match the original's formality but with PT-BR naturalness.\n"
+        "   - For conversational dialogue: prefer informal constructions, contractions, and natural discourse markers (e.g., 'né', 'tipo', 'então') where appropriate.\n"
+        "   - For formal text: keep formal grammar and avoid colloquialisms.\n"
+        "   - EXAMPLE: EN dialog 'You okay?' → PT-BR: 'Você tá bem?' (informal) not 'Você está bem?' when source is casual.\n"
+    )
+    return replace_rule_block(text, 6, block)
+
+
+def mut_numbers_dates(text: str) -> str:
+    # insert as rule 7 replacement to include numbers/dates
+    block = (
+        "7. Preserve punctuation and formatting; use PT-BR numeric/date formats where explicitly present in source context.\n"
+        "   - Dates: DD/MM/YYYY. Numbers: use ',' as decimal separator and '.' as thousand separator when formatting is required.\n"
+        "   - Preserve segment numbering and punctuation exactly unless transformation is requested.\n"
+    )
+    return replace_rule_block(text, 7, block)
+
+
 MUTATIONS = [
-    ("explicit_você_rule", "Always use 'você' instead of 'tu' or 'teu' — examples: \n- 'Você fez' NOT 'Tu fizeste'\n"),
-    ("avoid_pt-pt_vocab", "Avoid PT-PT vocabulary: replace 'autocarro'→'ônibus', 'telemovel'→'celular', 'miudos'→'crianças'\n"),
-    ("conversational_register", "Register: use conversational, informal Brazilian Portuguese for dialogues; prefer 'você' and colloquial contractions where natural.\n"),
-    ("gerund_examples", "Gerund rule: prefer 'estou fazendo' over 'estou a fazer'. Examples:\n- EN: I'm doing it. → PT-BR: Estou fazendo.\n"),
-    ("diminutives_rule", "Diminutives: use '-inho/inha' where natural for friendly tone, e.g., 'carrinho' for small car in informal contexts.\n"),
-    ("numbers_dates", "Numbers and dates: use PT-BR formatting (DD/MM/YYYY, ',' for decimals).\n"),
-    ("add_before_after_examples", "Examples (before → after):\n- 'He is eating.' → 'Ele está comendo.' (not 'Ele está a comer.')\n- 'The bus arrived.' → 'O ônibus chegou.'\n"),
+    ("refine_voce", mut_refine_voce),
+    ("refine_gerund", mut_refine_gerund),
+    ("refine_vocab", mut_refine_vocab),
+    ("refine_register", mut_refine_register),
+    ("numbers_dates_inplace", mut_numbers_dates),
 ]
 
 
@@ -85,11 +159,12 @@ def last_result():
     return rows[-1]
 
 
-def mutate_prompt(base_text: str, mutation: tuple) -> str:
-    name, body = mutation
-    # Simple mutation: append a small rule section with the mutation name
-    new = base_text.strip() + "\n\n" + f"### Mutation: {name}\n" + body + "\n"
-    return new
+def mutate_prompt(base_text: str, mutation) -> str:
+    name, func = mutation
+    try:
+        return func(base_text)
+    except Exception:
+        return base_text
 
 
 def main():
