@@ -23,6 +23,7 @@ import datetime
 import json
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))  # add project root to path
 
 # ---------------------------------------------------------------------------
 # Import _merge_segments from the pipeline without loading any heavy deps.
