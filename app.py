@@ -1341,7 +1341,10 @@ def translate_segments(
 # XTTS v2 synthesizes Portuguese at roughly this many characters per second
 # at natural speaking rate. Measured empirically on a range of texts.
 # Used to estimate output duration from character count before synthesis.
-XTTS_CHARS_PER_SEC = 25.0  # actual estimate is 22-28 cps depending on text, but we want a conservative upper bound for safety
+XTTS_CHARS_PER_SEC = 15.1  # Loop 4 calibrated 2026-03-21: MAE=0.321s, 40-sentence PT-BR corpus
+                             # Observed voice rates: pf_dora=13.3, pm_alex=13.1, pm_santa=12.9 cps
+                             # Per-voice spread <0.5 cps — single constant adequate
+                             # Loop 1 used 25.0 (merge fit proxy); this is ground truth audio measurement
 
 # PT-BR is structurally ~15% longer than English in character count after
 # translation (more syllables, obligatory pronouns, verbal inflection).
