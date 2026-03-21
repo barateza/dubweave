@@ -9,3 +9,8 @@ CRITICAL RULES:
 5. Use 3rd person verb conjugations with 'voce': 'voce esta' not 'voce estas'.
 6. Keep informal, conversational register as in the original.
 7. Preserve all punctuation and segment numbering exactly.
+
+### Mutation: explicit_você_rule
+Always use 'você' instead of 'tu' or 'teu' — examples: 
+- 'Você fez' NOT 'Tu fizeste'
+
