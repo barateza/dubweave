@@ -1,0 +1,15 @@
+timestamp	status	S	pct_5	pct_4+	pct_2-	n	description
+2026-03-21T16:40:15	BASELINE	4.0333	0.3	0.7667	0.0333	30	BASELINE initial
+2026-03-21T16:40:22	KEEP	4.1667	0.3667	0.8333	0.0333	30	exp#1 explicit_você_rule
+2026-03-21T16:40:31	DISCARD	4.1333	0.4	0.7667	0.0333	30	exp#2 avoid_pt-pt_vocab
+2026-03-21T16:40:38	DISCARD	4.1333	0.2667	0.8667	0.0	30	exp#3 conversational_register
+2026-03-21T16:40:45	KEEP	4.2667	0.4	0.9	0.0333	30	exp#4 gerund_examples
+2026-03-21T16:40:52	DISCARD	4.1667	0.3333	0.8667	0.0333	30	exp#5 diminutives_rule
+2026-03-21T16:41:01	DISCARD	4.1	0.3667	0.7667	0.0333	30	exp#6 numbers_dates
+2026-03-21T16:41:07	DISCARD	4.2667	0.4	0.9	0.0333	30	exp#7 add_before_after_examples
+2026-03-21T16:41:14	KEEP	4.3	0.4	0.9	0.0	30	exp#8 explicit_você_rule
+2026-03-21T16:41:22	DISCARD	4.2667	0.4	0.8667	0.0	30	exp#9 avoid_pt-pt_vocab
+2026-03-21T16:41:30	DISCARD	4.2	0.3667	0.8667	0.0333	30	exp#10 conversational_register
+2026-03-21T16:41:38	DISCARD	4.1	0.3	0.8333	0.0333	30	exp#11 gerund_examples
+2026-03-21T16:41:45	DISCARD	4.0667	0.3333	0.7667	0.0333	30	exp#12 diminutives_rule
+2026-03-21T16:41:52	DISCARD	4.2333	0.3667	0.8667	0.0	30	exp#13 numbers_dates

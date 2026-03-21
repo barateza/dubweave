@@ -29,6 +29,7 @@ The file contains free-form instructions for the translator model.
 ## What the judge scores on
 
 A Brazilian Portuguese linguist (Claude Haiku) scores each translation 1-5:
+
 - 5 = perfect PT-BR, accurate, natural register
 - 4 = minor issues
 - 3 = acceptable but imperfect
@@ -39,6 +40,7 @@ A Brazilian Portuguese linguist (Claude Haiku) scores each translation 1-5:
 
 These are the issues the current prompt already addresses.
 Your job is to make it address them better:
+
 - Using "tu/teu/tua" instead of "você/seu/sua"
 - Using "estou a fazer" instead of "estou fazendo" (PT-PT gerund)
 - Using PT-PT vocabulary: "autocarro", "telemovel", "miudos", "fixe"
@@ -51,22 +53,26 @@ Your job is to make it address them better:
 Work through these categories systematically:
 
 ### Rule precision
+
 - Add concrete examples to existing rules (show don't tell)
 - Split vague rules into specific sub-cases
 - Add negative examples ("NEVER write X, ALWAYS write Y")
 
 ### Coverage gaps
+
 - Add rules for numbers and dates (PT-BR vs PT-PT formatting)
 - Add rules for filler words ("né", "tipo", "então" as discourse markers)
 - Add rules for compound tenses (ter + participle vs haver + participle)
 - Add rules for diminutives (common in PT-BR speech)
 
 ### Structure
+
 - Reorder rules by frequency of failure (most common first)
 - Group related rules under subheadings
 - Add a "register" section for conversational tone
 
 ### Examples
+
 - Add 2-3 short before/after translation examples at the end of the prompt
 - Make examples match the corpus tags (gerund, vocabulary, voce_paradigm)
 
