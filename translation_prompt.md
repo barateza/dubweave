@@ -14,3 +14,7 @@ CRITICAL RULES:
 Always use 'você' instead of 'tu' or 'teu' — examples: 
 - 'Você fez' NOT 'Tu fizeste'
 
+### Mutation: gerund_examples
+Gerund rule: prefer 'estou fazendo' over 'estou a fazer'. Examples:
+- EN: I'm doing it. → PT-BR: Estou fazendo.
+
