@@ -30,10 +30,12 @@ import re
 import sys
 from pathlib import Path
 
-RULES_PATH   = Path("normalizer_rules.json")
-INJECT_PATH  = Path("ptpt_injection_corpus.json")
-CLEAN_PATH   = Path("corpus") / "ptbr_clean_corpus.txt"
-RESULTS_PATH = Path("results_loop3.tsv")
+ROOT         = Path(__file__).parent.parent
+AR           = Path(__file__).parent
+RULES_PATH   = ROOT / "normalizer_rules.json"
+INJECT_PATH  = AR / "ptpt_injection_corpus.json"
+CLEAN_PATH   = ROOT / "corpus" / "ptbr_clean_corpus.txt"
+RESULTS_PATH = AR / "results_loop3.tsv"
 
 FP_WEIGHT      = 0.50   # false positive penalty weight
 CLEAN_LINES    = 200    # how many clean PT-BR sentences to test for false positives

@@ -17,9 +17,11 @@ import argparse, csv, datetime, json, os, sys
 from pathlib import Path
 import urllib.request
 
-CORPUS_PATH   = Path("eval_corpus.json")
-PROMPT_PATH   = Path("translation_prompt.md")
-RESULTS_PATH  = Path("results_loop2.tsv")
+ROOT         = Path(__file__).parent.parent
+AR           = Path(__file__).parent
+CORPUS_PATH  = AR / "eval_corpus.json"
+PROMPT_PATH  = ROOT / "translation_prompt.md"
+RESULTS_PATH = AR / "results_loop2.tsv"
 
 OPENROUTER_KEY   = os.getenv("OPENROUTER_API_KEY", "").strip()
 TRANSLATE_MODEL  = "google/gemini-2.0-flash-001"

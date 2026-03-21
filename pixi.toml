@@ -45,3 +45,7 @@ setup          = { depends-on = ["download-nllb", "download-xtts", "download-kok
 format         = "black app.py"
 test           = "pytest tests/ -v"
 start          = "python app.py"
+benchmark       = "python autoresearch/benchmark.py"
+benchmark2      = "python autoresearch/benchmark_loop2.py"
+benchmark3      = "python autoresearch/benchmark_loop3.py"
+corpus          = "python autoresearch/prepare_corpus.py"

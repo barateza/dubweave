@@ -50,9 +50,11 @@ from app import _merge_segments  # noqa: E402
 # Paths
 # ---------------------------------------------------------------------------
 
-CORPUS_DIR   = Path("corpus")
-CONFIG_PATH  = Path("merge_config.json")
-RESULTS_PATH = Path("results.tsv")
+ROOT         = Path(__file__).parent.parent   # project root
+AR           = Path(__file__).parent          # autoresearch/
+CORPUS_DIR   = ROOT / "corpus"
+CONFIG_PATH  = AR / "merge_config.json"
+RESULTS_PATH = AR / "results.tsv"
 
 # ---------------------------------------------------------------------------
 # Composite metric weights
