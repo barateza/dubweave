@@ -25,7 +25,7 @@
     {"pattern": "\\bmiúdos\\b",       "replacement": "crianças",   "note": "vocab"},
     {"pattern": "\\bmiudos\\b",       "replacement": "crianças",   "note": "vocab"},
     {"pattern": "\\bfixe\\b",         "replacement": "legal",      "note": "vocab"},
-    {"pattern": "\\bgiro\\b",         "replacement": "bonito",     "note": "vocab"},
+    {"pattern": "(?<!capital de )\\bgiro\\b",         "replacement": "bonito",     "note": "vocab"},
     {"pattern": "\\bautocarro\\b",    "replacement": "ônibus",     "note": "vocab"},
     {"pattern": "\\bcomboio\\b",      "replacement": "trem",       "note": "vocab"},
     {"pattern": "\\btelemóvel\\b",    "replacement": "celular",    "note": "vocab"},
