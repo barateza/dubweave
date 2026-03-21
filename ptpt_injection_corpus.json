@@ -1,0 +1,302 @@
+[
+  {
+    "id": 1,
+    "ptpt": "Tu precisas de fazer isso agora.",
+    "ptbr": "Você precisa fazer isso agora.",
+    "tags": ["tu_pronoun", "gerund", "verb_2p"]
+  },
+  {
+    "id": 2,
+    "ptpt": "O autocarro está atrasado por causa do trânsito.",
+    "ptbr": "O ônibus está atrasado por causa do trânsito.",
+    "tags": ["vocab_autocarro"]
+  },
+  {
+    "id": 3,
+    "ptpt": "Estás a ver o que eu quero dizer?",
+    "ptbr": "Você está vendo o que eu quero dizer?",
+    "tags": ["verb_2p", "gerund"]
+  },
+  {
+    "id": 4,
+    "ptpt": "O teu telemóvel está a tocar.",
+    "ptbr": "O seu celular está tocando.",
+    "tags": ["teu_pronoun", "vocab_telemovel", "gerund"]
+  },
+  {
+    "id": 5,
+    "ptpt": "Os miúdos estão a brincar no jardim.",
+    "ptbr": "As crianças estão brincando no jardim.",
+    "tags": ["vocab_miudos", "gerund"]
+  },
+  {
+    "id": 6,
+    "ptpt": "Podes ajudar-me com este problema?",
+    "ptbr": "Você pode me ajudar com este problema?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 7,
+    "ptpt": "Aquela festa foi muito fixe!",
+    "ptbr": "Aquela festa foi muito legal!",
+    "tags": ["vocab_fixe"]
+  },
+  {
+    "id": 8,
+    "ptpt": "O comboio para Lisboa parte às oito horas.",
+    "ptbr": "O trem para Lisboa parte às oito horas.",
+    "tags": ["vocab_comboio"]
+  },
+  {
+    "id": 9,
+    "ptpt": "Sabes onde fica a casa de banho?",
+    "ptbr": "Você sabe onde fica o banheiro?",
+    "tags": ["verb_2p", "vocab_casa_de_banho"]
+  },
+  {
+    "id": 10,
+    "ptpt": "Ele está a trabalhar no escritório agora.",
+    "ptbr": "Ele está trabalhando no escritório agora.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 11,
+    "ptpt": "Tens razão sobre isso, não tens?",
+    "ptbr": "Você tem razão sobre isso, não tem?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 12,
+    "ptpt": "A tua mãe é muito simpática.",
+    "ptbr": "A sua mãe é muito simpática.",
+    "tags": ["tua_pronoun"]
+  },
+  {
+    "id": 13,
+    "ptpt": "Não percebo por que fazes isso.",
+    "ptbr": "Não entendo por que você faz isso.",
+    "tags": ["vocab_perceber", "verb_2p"]
+  },
+  {
+    "id": 14,
+    "ptpt": "Ela estava a falar com o chefe quando chegámos.",
+    "ptbr": "Ela estava falando com o chefe quando chegamos.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 15,
+    "ptpt": "Vens jantar connosco hoje à noite?",
+    "ptbr": "Você vem jantar conosco hoje à noite?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 16,
+    "ptpt": "O teu carro é muito giro.",
+    "ptbr": "O seu carro é muito bonito.",
+    "tags": ["teu_pronoun", "vocab_giro"]
+  },
+  {
+    "id": 17,
+    "ptpt": "Gostas de futebol?",
+    "ptbr": "Você gosta de futebol?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 18,
+    "ptpt": "Estavam a discutir sobre política durante horas.",
+    "ptbr": "Estavam discutindo sobre política durante horas.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 19,
+    "ptpt": "O que dizes sobre a nova proposta?",
+    "ptbr": "O que você diz sobre a nova proposta?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 20,
+    "ptpt": "Vós tendes que perceber a situação.",
+    "ptbr": "Vocês têm que entender a situação.",
+    "tags": ["vos_pronoun", "vocab_perceber"]
+  },
+  {
+    "id": 21,
+    "ptpt": "Os teus amigos são muito simpáticos.",
+    "ptbr": "Os seus amigos são muito simpáticos.",
+    "tags": ["teus_pronoun"]
+  },
+  {
+    "id": 22,
+    "ptpt": "Estás a gostar do novo emprego?",
+    "ptbr": "Você está gostando do novo emprego?",
+    "tags": ["verb_2p", "gerund"]
+  },
+  {
+    "id": 23,
+    "ptpt": "Eles foram apanhados a roubar no supermercado.",
+    "ptbr": "Eles foram pegos roubando no supermercado.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 24,
+    "ptpt": "Podes deixar o telemóvel em cima da mesa.",
+    "ptbr": "Você pode deixar o celular em cima da mesa.",
+    "tags": ["verb_2p", "vocab_telemovel"]
+  },
+  {
+    "id": 25,
+    "ptpt": "As tuas ideias são sempre muito boas.",
+    "ptbr": "As suas ideias são sempre muito boas.",
+    "tags": ["tuas_pronoun"]
+  },
+  {
+    "id": 26,
+    "ptpt": "Queres ir ao autocarro ou preferes andar?",
+    "ptbr": "Você quer pegar o ônibus ou prefere andar?",
+    "tags": ["verb_2p", "vocab_autocarro"]
+  },
+  {
+    "id": 27,
+    "ptpt": "Ele está a tentar perceber o problema.",
+    "ptbr": "Ele está tentando entender o problema.",
+    "tags": ["gerund", "vocab_perceber"]
+  },
+  {
+    "id": 28,
+    "ptpt": "Vês aquele edifício ali ao fundo?",
+    "ptbr": "Você vê aquele edifício ali ao fundo?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 29,
+    "ptpt": "Os miúdos adoram apanhar o comboio.",
+    "ptbr": "As crianças adoram pegar o trem.",
+    "tags": ["vocab_miudos", "vocab_comboio"]
+  },
+  {
+    "id": 30,
+    "ptpt": "Ficas sempre a ver televisão até tarde.",
+    "ptbr": "Você fica sempre vendo televisão até tarde.",
+    "tags": ["verb_2p", "gerund"]
+  },
+  {
+    "id": 31,
+    "ptpt": "Não percebo nada do que dizes.",
+    "ptbr": "Não entendo nada do que você diz.",
+    "tags": ["vocab_perceber", "verb_2p"]
+  },
+  {
+    "id": 32,
+    "ptpt": "A casa de banho está no primeiro andar.",
+    "ptbr": "O banheiro está no primeiro andar.",
+    "tags": ["vocab_casa_de_banho"]
+  },
+  {
+    "id": 33,
+    "ptpt": "Estás a fazer o trabalho de casa?",
+    "ptbr": "Você está fazendo o dever de casa?",
+    "tags": ["verb_2p", "gerund"]
+  },
+  {
+    "id": 34,
+    "ptpt": "O teu irmão também vai à festa?",
+    "ptbr": "O seu irmão também vai à festa?",
+    "tags": ["teu_pronoun"]
+  },
+  {
+    "id": 35,
+    "ptpt": "Imensamente grato pela tua ajuda.",
+    "ptbr": "Muito grato pela sua ajuda.",
+    "tags": ["vocab_imensamente", "tua_pronoun"]
+  },
+  {
+    "id": 36,
+    "ptpt": "Vais ao comboio ou ao autocarro?",
+    "ptbr": "Você vai de trem ou de ônibus?",
+    "tags": ["verb_2p", "vocab_comboio", "vocab_autocarro"]
+  },
+  {
+    "id": 37,
+    "ptpt": "Aquilo que fazes é somente para ti.",
+    "ptbr": "Aquilo que você faz é só para você.",
+    "tags": ["verb_2p", "vocab_somente"]
+  },
+  {
+    "id": 38,
+    "ptpt": "Ela está a aprender a conduzir.",
+    "ptbr": "Ela está aprendendo a dirigir.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 39,
+    "ptpt": "Foram apanhados a fumar no corredor.",
+    "ptbr": "Foram pegos fumando no corredor.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 40,
+    "ptpt": "Ainda bem que percebeste o problema.",
+    "ptbr": "Ainda bem que você entendeu o problema.",
+    "tags": ["vocab_perceber"]
+  },
+  {
+    "id": 41,
+    "ptpt": "O passeio estava cheio de pessoas.",
+    "ptbr": "A calçada estava cheia de pessoas.",
+    "tags": ["vocab_passeio"]
+  },
+  {
+    "id": 42,
+    "ptpt": "Que giro esse vestido que trouxeste!",
+    "ptbr": "Que bonito esse vestido que você trouxe!",
+    "tags": ["vocab_giro"]
+  },
+  {
+    "id": 43,
+    "ptpt": "Tens o telemóvel carregado?",
+    "ptbr": "Você tem o celular carregado?",
+    "tags": ["verb_2p", "vocab_telemovel"]
+  },
+  {
+    "id": 44,
+    "ptpt": "Eles estavam a correr quando caíram.",
+    "ptbr": "Eles estavam correndo quando caíram.",
+    "tags": ["gerund"]
+  },
+  {
+    "id": 45,
+    "ptpt": "Dizes sempre a verdade, sabes?",
+    "ptbr": "Você sempre diz a verdade, sabe?",
+    "tags": ["verb_2p"]
+  },
+  {
+    "id": 46,
+    "ptpt": "O comboio das oito está atrasado.",
+    "ptbr": "O trem das oito está atrasado.",
+    "tags": ["vocab_comboio"]
+  },
+  {
+    "id": 47,
+    "ptpt": "Queres perceber ou preferes ignorar?",
+    "ptbr": "Você quer entender ou prefere ignorar?",
+    "tags": ["verb_2p", "vocab_perceber"]
+  },
+  {
+    "id": 48,
+    "ptpt": "Os miúdos foram de autocarro para a escola.",
+    "ptbr": "As crianças foram de ônibus para a escola.",
+    "tags": ["vocab_miudos", "vocab_autocarro"]
+  },
+  {
+    "id": 49,
+    "ptpt": "Estou a tentar mas não consigo perceber.",
+    "ptbr": "Estou tentando mas não consigo entender.",
+    "tags": ["gerund", "vocab_perceber"]
+  },
+  {
+    "id": 50,
+    "ptpt": "Vês? É somente isso que te pedia.",
+    "ptbr": "Vê? É só isso que te pedia.",
+    "tags": ["verb_2p", "vocab_somente"]
+  }
+]
