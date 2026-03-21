@@ -21,6 +21,7 @@
     {"pattern": "\\bvais\\b",         "replacement": "vai",        "note": "verb_2p"},
     {"pattern": "\\bficas\\b",        "replacement": "fica",       "note": "verb_2p"},
     {"pattern": "\\bperceber\\b",     "replacement": "entender",   "note": "vocab"},
+    {"pattern": "\\bpercebeste\\b",  "replacement": "entendeu",   "note": "conj_perceber"},
     {"pattern": "\\bmiúdos\\b",       "replacement": "crianças",   "note": "vocab"},
     {"pattern": "\\bmiudos\\b",       "replacement": "crianças",   "note": "vocab"},
     {"pattern": "\\bfixe\\b",         "replacement": "legal",      "note": "vocab"},
