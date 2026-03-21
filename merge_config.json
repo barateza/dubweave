@@ -1,0 +1,7 @@
+{
+  "_comment": "Autoresearch loop 1 — merge threshold config. Agent edits this file only.",
+  "min_words": 4,
+  "max_words": 40,
+  "max_duration": null,
+  "chars_per_sec": 14.5
+}

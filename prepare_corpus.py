@@ -31,7 +31,7 @@ VIDEOS = [
     ("canada_mayor",         "https://www.youtube.com/watch?v=nACJOKV_YYA"),
 ]
 
-WHISPER_MODEL  = os.environ.get("WHISPER_MODEL", "tiny.en")  # small, fast, English-only; good enough for benchmarking
+WHISPER_MODEL  = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 CORPUS_DIR     = Path("corpus")
 AUDIO_FORMAT   = "m4a"   # fast, lossless enough for Whisper
 
@@ -115,7 +115,7 @@ def main() -> None:
             continue
 
         # --- Save ---
-        json_path.write_text(json.dumps(segments, indent=2, ensure_ascii=False))
+        json_path.write_text(json.dumps(segments, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"  Saved {len(segments)} segments → {json_path.name}")
 
         # --- Clean up audio (keep only the JSON) ---
