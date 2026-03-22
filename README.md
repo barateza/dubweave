@@ -12,8 +12,6 @@ My wife Aline speaks Portuguese, and I kept coming across English content — es
 
 Beyond that, this project was a deliberate learning exercise. I wanted to understand, end-to-end, how modern AI pipelines actually fit together — not just call an API and get a result, but build the full stack myself: automatic speech recognition with Whisper, neural machine translation with NLLB-200, large-language-model translation with context windows, a text-to-speech voice-cloning system with XTTS v2, a lightweight native TTS model with Kokoro-82M, and media assembly with FFmpeg. Every stage taught something different — how to manage GPU memory across multiple models, how to handle timing constraints when synthesized speech is a different length than the original, how to make download pipelines resilient to platform countermeasures, and how to build a UI that exposes all of this without getting in the way.
 
-The result is a fully local, privacy-preserving dubbing pipeline that runs on a consumer GPU and produces a watchable dubbed MP4 from any video source. Every stage taught something different: how to manage GPU memory across multiple models, how to handle timing constraints when synthesized speech is a different length than the original, how to make download and upload pipelines resilient, and how to build a UI that exposes all of this without getting in the way.
-
 The result is a fully local, privacy-preserving dubbing pipeline that runs on a consumer GPU and produces a watchable dubbed MP4 from any video source. It's personal software built for a personal reason, and that made it easy to care about the details.
 
 ---
@@ -26,7 +24,7 @@ Any URL or local file upload
     ↓  Whisper (GPU)            → transcribes speech (large-v3-turbo)
     ↓  Segment Merging          → groups fragments into semantic utterances
     ↓  NLLB-200 / OpenRouter    → translates EN→PT-BR (local or LLM)
-    ↓  PT-BR Norm               → 30+ rules: pronouns, gerunds, Brazilian vocab
+    ↓  PT-BR Norm               → 36 rules: pronouns, gerunds, Brazilian vocab
     ↓  Timing Budget Pass       → predicts overflow, truncates or rephrases
     ↓  Kokoro / XTTS / Google   → synthesizes PT-BR speech (fast, clone, or cloud)
     ↓  FFmpeg + numpy buffer    → time-aligns, peak-normalizes, muxes with video
@@ -122,9 +120,9 @@ Restart `start.bat` for changes to take effect.
 
 ## Features
 
-### Kokoro-82M TTS (New Default)
+### Kokoro-82M TTS (Default)
 
-Dubweave now ships with **Kokoro-82M** as the default TTS engine — 82 million parameters, loads in under 2 seconds, uses under 500 MB of VRAM, and produces native PT-BR prosody with three built-in voices (`pf_dora` · `pm_alex` · `pm_santa`). No voice cloning overhead. Switch to XTTS v2 in the UI when you need speaker-matched voice cloning from the original audio.
+Dubweave ships with **Kokoro-82M** as the default TTS engine — 82 million parameters, loads in under 2 seconds, uses under 500 MB of VRAM, and produces native PT-BR prosody with three built-in voices (`pf_dora` · `pm_alex` · `pm_santa`). No voice cloning overhead. Switch to XTTS v2 in the UI when you need speaker-matched voice cloning from the original audio.
 
 ### Google Cloud TTS (Premium Cloud Option)
 
@@ -136,19 +134,19 @@ Every run is saved as a named project under `projects/`. You can resume from any
 
 ### Coherent Translation with Context Window
 
-Unlike segment-by-segment translation (Argos), Dubweave merges Whisper fragments into full semantic utterances before translating. When using OpenRouter (LLM mode), each request includes the 3 preceding translated utterances as a read-only context window to preserve pronoun references and narrative flow across chunk boundaries.
+Unlike segment-by-segment translation, Dubweave merges Whisper fragments into full semantic utterances before translating. When using OpenRouter (LLM mode), each request includes the 3 preceding translated utterances as a read-only context window to preserve pronoun references and narrative flow across chunk boundaries.
 
 ### PT-PT → PT-BR Normalizer
 
-More than 30 regex-based substitution rules applied after every translation pass — NLLB or LLM. Covers pronouns (`tu` → `você`), verb paradigms (`estás` → `está`, `gostavas` → `gostava`), gerund construction (`a fazer` → `fazendo`), and vocabulary (`autocarro` → `ônibus`, `telemóvel` → `celular`, `miúdos` → `crianças`).
+36 regex-based substitution rules applied after every translation pass — NLLB or LLM. Rules are loaded at runtime from `normalizer_rules.json`, making them editable without touching pipeline code. Covers pronouns (`tu` → `você`), verb paradigms (`estás` → `está`, `gostavas` → `gostava`), gerund construction (`a fazer` → `fazendo`), vocabulary (`autocarro` → `ônibus`, `telemóvel` → `celular`, `miúdos` → `crianças`), and past-tense conjugations (`percebeste` → `entendeu`). Rules were validated against a 50-sentence PT-PT injection corpus and 200 native PT-BR sentences to ensure zero false positives.
 
 ### Timing Budget Pass
 
-Before synthesis, Dubweave estimates the output duration for each segment using a measured PT-BR speech-rate constant. Segments predicted to overflow their time slot are proactively shortened: first by trying a concise LLM rephrase (if OpenRouter is configured), then by hard-truncating to the last complete word that fits. This eliminates desync before it happens.
+Before synthesis, Dubweave estimates the output duration for each segment using a calibrated PT-BR speech-rate constant (15.1 chars/sec, measured empirically across all three Kokoro voices). Segments predicted to overflow their time slot are proactively shortened: first by trying a concise LLM rephrase (if OpenRouter is configured), then by hard-truncating to the last complete word that fits. This eliminates desync before it happens.
 
 ### LLM Translation via OpenRouter
 
-If you set an **OpenRouter API key** in `.env` (see [Configuration](#configuration) section), Gemini 2.0 Flash translates at ~$0.002 per 10-minute video with explicit PT-BR system instructions (Brazilian vocabulary, `você` paradigm, gerund forms). NLLB-200 local translation is used automatically as a fallback if the key is empty or the request fails.
+If you set an **OpenRouter API key** in `.env`, Gemini 2.0 Flash translates at ~$0.002 per 10-minute video with explicit PT-BR system instructions (Brazilian vocabulary, `você` paradigm, gerund forms) loaded from `translation_prompt.md`. NLLB-200 local translation is used automatically as a fallback if the key is empty or the request fails.
 
 ### SRT Subtitle Export
 
@@ -174,8 +172,6 @@ The Dubweave web UI meets **WCAG 2.1 Level AA** accessibility standards with enh
 - **Motion sensitivity** (`prefers-reduced-motion`): Animations are disabled for users with vestibular disorders
 - **Zoom to 200%**: All content remains accessible at high magnification
 
-For detailed compliance information, see [WCAG 2.1 Accessibility Compliance](https://github.com/karpetrosyan/dubweave/blob/main/.specs/features/accessibility/WCAG-COMPLIANCE.md).
-
 ---
 
 ## GPU Memory
@@ -193,9 +189,49 @@ Kokoro mode runs comfortably on 6 GB cards (RTX 3060 Ti / RTX 4060+). XTTS v2 mo
 
 ---
 
-## License
+## Autoresearch
 
-Pipeline code: MIT. Models: XTTS v2 (Coqui PLM), NLLB (MIT/Apache 2.0), Whisper (MIT), Kokoro-82M (Apache 2.0).
+The `autoresearch/` directory contains a self-improvement infrastructure inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch). Each loop has a fixed evaluation corpus, a single mutable config file, and a benchmark harness that scores changes and logs KEEP/DISCARD decisions. An AI agent (GitHub Copilot Autopilot) runs experiments autonomously overnight.
+
+Four loops have been completed:
+
+| Loop | What it optimizes | Result |
+| --- | --- | --- |
+| **Loop 1** | Segment merge parameters (`min_words`, `max_words`, `gap_sec`) | Composite score: 0.505 → 0.813 (+61%) |
+| **Loop 2** | Translation system prompt (`translation_prompt.md`) | Translations rated 4+/5: 76.7% → 90.0% |
+| **Loop 3** | PT-BR normalizer rules (`normalizer_rules.json`) | Detection rate: 92% → 100%, false positives: 2.5% → 0% |
+| **Loop 4** | Kokoro speech rate calibration | Timing prediction MAE: 0.9s → 0.321s (−64%) |
+
+### Key discoveries
+
+**Loop 1** found that the original `chars_per_sec` constant was off by 70% — `apply_timing_budget` was pre-trimming translations that would have fit fine. Also found that `min_words=4` was too low for `large-v3-turbo`, which produces very fine-grained segments; raising it to 8 absorbed short utterances into their neighbours.
+
+**Loop 2** showed that concrete CORRECT/WRONG examples outperform abstract rules for LLM instruction. Adding explicit form pairs (`'Você fez' NOT 'Tu fizeste'`) improved translation quality more than rephrasing the rule in different words.
+
+**Loop 3** found that two rules in the original normalizer (`somente`→`só`, `apenas`→`só`) were false positives — they were changing perfectly valid PT-BR. The agent found this without being told to look for it.
+
+**Loop 4** measured Kokoro at 15.1 chars/sec across all three voices (spread: 0.4 cps), vs the assumed 18.0. This fixed a systematic overtrimming of long but valid translations.
+
+### Running the benchmarks
+
+```powershell
+# Loop 1 — merge params (~1s, no API)
+pixi run python autoresearch/benchmark.py --status
+
+# Loop 2 — translation prompt (~40s, OpenRouter)
+pixi run python autoresearch/benchmark_loop2.py --status
+
+# Loop 3 — normalizer rules (~1s, no API)
+pixi run python autoresearch/benchmark_loop3.py --status
+```
+
+To run a new experiment, edit the mutable config file and call the benchmark with a description:
+
+```powershell
+# Example: test a new merge parameter
+# Edit autoresearch/merge_config.json, then:
+pixi run python autoresearch/benchmark.py -d "hypothesis: raise max_words to 60"
+```
 
 ---
 
@@ -257,6 +293,12 @@ Open `.env` with a text editor and review all settings before running.
 
 ---
 
+## License
+
+Pipeline code: MIT. Models: XTTS v2 (Coqui PLM), NLLB (MIT/Apache 2.0), Whisper (MIT), Kokoro-82M (Apache 2.0).
+
+---
+
 ## Acknowledgements
 
 This project bundles and integrates several third-party tools and models. Thank you to the authors and maintainers of the following projects — please review each project's license before redistribution or commercial use.
@@ -271,5 +313,6 @@ This project bundles and integrates several third-party tools and models. Thank 
 - **aria2c** — optional download accelerator
 - **Pixi** — environment manager used for setup
 - **OpenRouter** — optional LLM translation endpoint (user-supplied key)
+- **Karpathy's autoresearch** — inspiration for the self-improvement infrastructure
 
 License compliance note: the pipeline code is MIT. Each bundled model and tool carries its own license (Apache 2.0, MIT, Coqui PLM). If you redistribute binaries, model files, or installers, ensure you comply with each project's license and attribution requirements.
