@@ -4,49 +4,70 @@ version = "0.1.0"
 description = "YouTube -> pt-br dubbing pipeline"
 authors = ["Gilson Siqueira"]
 channels = ["pytorch", "nvidia", "conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "osx-arm64"]
 
 [system-requirements]
 cuda = "12.4"
 
+# ── Shared conda dependencies (all platforms) ────────────────────────────────
 [dependencies]
 python = ">=3.10,<3.12"
 ffmpeg = "*"
 numpy = ">=1.24,<2.0"          # gruut requires <2.0
 networkx = ">=2.5,<3.0"        # gruut requires <3.0
+deno = "*"                     # JS runtime for yt-dlp YouTube n-challenge solving
+black = ">=26.1.0,<27"         # Python code formatter
 
+# ── Shared PyPI dependencies (all platforms) ─────────────────────────────────
+[pypi-dependencies]
+yt-dlp = "*"
+openai-whisper = "*"
+transformers = ">=4.33,<4.38"  # BeamSearchScorer removed in 4.38; TTS 0.22.0 requires the old API
+gradio = "*"
+sentencepiece = "*"            # required by NLLB-200 tokenizer
+pytest = ">=7.0"
+soundfile = "*"                # WAV I/O for Kokoro numpy output
+python-dotenv = "*"            # Load environment variables from .env file
+edge-tts = "*"                 # Microsoft Edge Neural TTS — no API key, no VRAM
+
+# ── Windows-only dependencies ─────────────────────────────────────────────────
+[target.win-64.dependencies]
 pytorch = { version = ">=2.1", channel = "pytorch" }
 torchvision = { version = "*", channel = "pytorch" }
 torchaudio = { version = "*", channel = "pytorch" }
 pytorch-cuda = { version = "12.4.*", channel = "pytorch" }
-deno = "*"                             # JS runtime for yt-dlp YouTube n-challenge solving
-black = ">=26.1.0,<27"                   # Python code formatter
 
-[pypi-dependencies]
-yt-dlp = "*"
-openai-whisper = "*"
-TTS = "==0.22.0"
-transformers = ">=4.33,<4.38"  # BeamSearchScorer removed in 4.38; TTS 0.22.0 requires the old API
-gradio = "*"
-sentencepiece = "*"           # required by NLLB-200 tokenizer
-triton-windows = "*"           # Windows port of Triton — GPU kernels for Whisper DTW/median ops
-kokoro = "*"                   # Kokoro-82M TTS — 82M params, native PT-BR, Apache 2.0
-pytest = ">=7.0"
+[target.win-64.pypi-dependencies]
+TTS = "==0.22.0"               # Coqui XTTS v2 — Windows/CUDA only
+triton-windows = "*"           # Windows port of Triton — GPU kernels for Whisper
+kokoro = "*"                   # Kokoro-82M TTS — requires espeak-ng (Windows MSI)
 hf_xet = "*"                   # Faster HF downloads
-soundfile = "*"                # WAV I/O for Kokoro numpy output
-python-dotenv = "*"            # Load environment variables from .env file
-edge-tts = "*"
 
+# ── macOS (Apple Silicon) dependencies ───────────────────────────────────────
+# PyTorch CPU-only on macOS; MPS (Metal) available but not required here.
+# XTTS v2, Kokoro, and triton-windows are skipped — GPU synthesis unavailable.
+# All autoresearch benchmarks (loop1–5), pytest, and Gradio UI work fully.
+[target.osx-arm64.dependencies]
+pytorch = { version = ">=2.1", channel = "pytorch" }
+torchvision = { version = "*", channel = "pytorch" }
+torchaudio = { version = "*", channel = "pytorch" }
+
+[target.osx-arm64.pypi-dependencies]
+hf_xet = "*"                   # Faster HF downloads
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
 [tasks]
 download-nllb   = "python -W ignore::FutureWarning -c \"from transformers import pipeline; pipeline('translation', model='facebook/nllb-200-distilled-600M', src_lang='eng_Latn', tgt_lang='por_Latn'); print('NLLB-200 ready.')\""
-download-xtts  = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2'); print('XTTS v2 ready.')\""
+download-xtts   = "python -W ignore::FutureWarning -c \"from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2'); print('XTTS v2 ready.')\""
 download-kokoro = "python -W ignore -c \"from kokoro import KPipeline; KPipeline(lang_code='p', repo_id='hexgrad/Kokoro-82M'); print('Kokoro PT-BR ready.')\""
-fetch-ejs      = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
-setup          = { depends-on = ["download-nllb", "download-xtts", "download-kokoro", "fetch-ejs"] }
-format         = "black app.py"
-test           = "pytest tests/ -v"
-start          = "python app.py"
+fetch-ejs       = "yt-dlp --remote-components ejs:github --skip-download \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\" && echo EJS solver ready."
+setup           = { depends-on = ["download-nllb", "download-xtts", "download-kokoro", "fetch-ejs"] }
+setup-mac       = { depends-on = ["download-nllb", "fetch-ejs"] }
+format          = "black app.py"
+test            = "pytest tests/ -v"
+start           = "python app.py"
 benchmark       = "python autoresearch/benchmark.py"
 benchmark2      = "python autoresearch/benchmark_loop2.py"
 benchmark3      = "python autoresearch/benchmark_loop3.py"
+benchmark5      = "python autoresearch/calibrate_tts_edge.py"
 corpus          = "python autoresearch/prepare_corpus.py"
