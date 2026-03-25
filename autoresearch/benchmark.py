@@ -171,6 +171,7 @@ _TSV_FIELDS = [
     "fit", "boundary", "sweet", "over", "n_segs",
     "min_words", "max_words", "max_duration", "chars_per_sec",
     "gap_sec",           # ← NEW column (null when unused)
+    "voice",             # ← Voice name column
     "description",
 ]
 
@@ -190,8 +191,9 @@ def log_result(config: dict, scores: dict, status: str, description: str = "") -
         "max_duration": config.get("max_duration", "null"),
         "chars_per_sec": config.get("chars_per_sec", 14.5),
         "gap_sec":      config.get("gap_sec", "null"),   # ← NEW
+        "voice":        config.get("voice", "unknown"),
         "description":  description or "",
-    }
+}
     write_header = not RESULTS_PATH.exists() or RESULTS_PATH.stat().st_size == 0
     with open(RESULTS_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_TSV_FIELDS, delimiter="\t")
@@ -200,13 +202,15 @@ def log_result(config: dict, scores: dict, status: str, description: str = "") -
         writer.writerow(row)
 
 
-def read_best_S() -> float | None:
-    """Return the best (highest) S among all KEEP rows, or None."""
+def read_best_S(voice: str | None = None) -> float | None:
+    """Return the best (highest) S among all KEEP rows for a specific voice, or None."""
     if not RESULTS_PATH.exists():
         return None
     best = None
     with open(RESULTS_PATH, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f, delimiter="\t"):
+            if voice and row.get("voice") != voice:
+                continue
             if row.get("status") in ("KEEP", "BASELINE"):
                 try:
                     s = float(row["S"])
@@ -232,6 +236,7 @@ def print_last(n: int = 10) -> None:
             f"n={row['n_segs']}  "
             f"min_w={row['min_words']} max_w={row['max_words']} "
             f"max_dur={row['max_duration']}  gap={gap}  "
+            f"voice={row.get('voice', 'unknown')}  "
             f"{row.get('description', '')}"
         )
 
@@ -265,6 +270,7 @@ def run_sweep() -> None:
 
 
 def main() -> None:
+    print(f"DEBUG sys.argv: {sys.argv}")
     parser = argparse.ArgumentParser(
         description="Dubweave Loop 1 v2 benchmark — score merge_config.json"
     )
@@ -288,6 +294,11 @@ def main() -> None:
         default="",
         help="Short description of this experiment (logged to results.tsv)",
     )
+    parser.add_argument(
+        "--voice",
+        default=None,
+        help="Voice name for this benchmark run",
+    )
     args = parser.parse_args()
 
     if args.status:
@@ -300,6 +311,8 @@ def main() -> None:
         sys.exit(1)
 
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    if args.voice:
+        config["voice"] = args.voice
 
     if args.sweep:
         run_sweep()
@@ -313,10 +326,10 @@ def main() -> None:
     if args.baseline:
         status = "BASELINE"
     else:
-        best = read_best_S()
+        best = read_best_S(config.get("voice"))
         if best is None:
             print(
-                "WARNING: No BASELINE or KEEP row found in results.tsv. "
+                f"WARNING: No BASELINE or KEEP row found for voice '{config.get('voice')}' in results.tsv. "
                 "Run with --baseline first.",
                 file=sys.stderr,
             )
@@ -325,6 +338,7 @@ def main() -> None:
             status = "KEEP" if scores["S"] > best else "DISCARD"
 
     # Log
+    print(f"DEBUG status: {status}")
     log_result(config, scores, status, description=args.description)
 
     # Print
@@ -341,7 +355,7 @@ def main() -> None:
     print(f"  gap_sec    = {gap_label}")
     print(f"\n  status     = {status}")
     if status == "DISCARD":
-        best = read_best_S()
+        best = read_best_S(config.get("voice"))
         print(f"  best so far = {best:.5f}")
 
     print(f"\n  Logged → {RESULTS_PATH}")

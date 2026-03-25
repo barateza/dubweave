@@ -1159,6 +1159,41 @@ def _translate_openrouter(
     return all_translated, logs
 
 
+# ── Segment Merge Configs (calibrated via Autoresearch Loop 1) ────────────────
+# Optimized to group Whisper segments into utterances that translate well
+# and fit within synthesis slots for specific TTS engines.
+
+MERGE_CONFIGS = {
+    "kokoro": {
+        "min_words": 8,
+        "max_words": 100,
+        "gap_sec": 3.0,
+        "max_duration": None,
+    },
+    "edge": {
+        "min_words": 10,
+        "max_words": 100,
+        "gap_sec": 2.0,
+        "max_duration": None,
+    },
+    "default": {
+        "min_words": 8,
+        "max_words": 50,
+        "gap_sec": 2.0,
+        "max_duration": None,
+    },
+}
+
+
+def _get_merge_config(engine: str) -> dict:
+    """Return the optimized merge parameters for a given TTS engine."""
+    if engine.startswith("Kokoro"):
+        return MERGE_CONFIGS["kokoro"]
+    if engine.startswith("Edge"):
+        return MERGE_CONFIGS["edge"]
+    return MERGE_CONFIGS["default"]
+
+
 # ── Public translate_segments (NLLB primary, OpenRouter fallback) ─────────────
 
 # ── Segment merging ──────────────────────────────────────────────────────────
@@ -1321,7 +1356,10 @@ def _expand_merged(merged_translated: list, original_segments: list) -> list:
 
 
 def translate_segments(
-    segments: list, logs: list, openrouter_key: str = ""
+    segments: list,
+    logs: list,
+    openrouter_key: str = "",
+    merge_config: dict | None = None,
 ) -> tuple[list, list]:
     """
     Translate segments EN→PT-BR.
@@ -1337,7 +1375,8 @@ def translate_segments(
       4. Apply PT-PT → PT-BR normalizer as final safety pass.
     """
     # ── Step 1: merge ─────────────────────────────────────────────────────────
-    merged = _merge_segments(segments)
+    m_cfg = merge_config or MERGE_CONFIGS["default"]
+    merged = _merge_segments(segments, **m_cfg)
     logs = log(
         f"   Merged {len(segments)} Whisper segments → {len(merged)} utterances for translation",
         logs,
@@ -1395,30 +1434,43 @@ def translate_segments(
 
 # ── Backward constraint: source rate → text budget ───────────────────────────
 
-# XTTS v2 synthesizes Portuguese at roughly this many characters per second
-# at natural speaking rate. Measured empirically on a range of texts.
-# Used to estimate output duration from character count before synthesis.
-XTTS_CHARS_PER_SEC = 15.1  # Loop 4 calibrated 2026-03-21: MAE=0.321s, 40-sentence PT-BR corpus
-                             # Observed voice rates: pf_dora=13.3, pm_alex=13.1, pm_santa=12.9 cps
-                             # Per-voice spread <0.5 cps — single constant adequate
-                             # Loop 1 used 25.0 (merge fit proxy); this is ground truth audio measurement
-
-# PT-BR is structurally ~15% longer than English in character count after
-# translation (more syllables, obligatory pronouns, verbal inflection).
-# This is the systematic bias the pipeline cannot see without prediction.
-PTBR_EXPANSION_FACTOR = 1.15
-
-# Maximum compression we will apply via atempo without quality loss.
-# Matches the cap in synthesize_segments.
-MAX_ATEMPO = 1.6
+# PT-BR synthesis capacity (chars/sec) calibrated via Loop 4/5.
+# Higher = speaker is faster; lower = speaker needs more time per char.
+VOICE_CALIBRATION: dict[str, float] = {
+    # Kokoro (calibrated 2026-03-21)
+    "pf_dora": 13.3,
+    "pm_alex": 13.1,
+    "pm_santa": 12.9,
+    # Edge-TTS (calibrated 2026-03-25)
+    "pt-BR-FranciscaNeural": 11.1,
+    "pt-BR-AntonioNeural": 11.1,
+    "pt-BR-ThalitaNeural": 13.1,
+    # Default/Fallback
+    "default": 15.1,  # Previous XTTS v2 baseline
+}
 
 
-def _estimate_synth_duration(text: str) -> float:
-    """Estimate XTTS synthesis duration from character count."""
-    return len(text.strip()) / XTTS_CHARS_PER_SEC
+def _estimate_synth_duration(text: str, cps: float = 15.1) -> float:
+    """Estimate synthesis duration from character count and capacity."""
+    return len(text.strip()) / cps
 
 
-def _trim_to_budget(text: str, budget_secs: float, openrouter_key: str) -> str:
+def _get_cps_for_voice(engine: str, voice: str) -> float:
+    """Return the calibrated chars/sec for a given engine + voice."""
+    lookup = voice
+    if engine.startswith("Kokoro"):
+        # kokoro voices are keys themselves
+        pass
+    elif engine.startswith("Edge"):
+        # edge voices are keys themselves
+        pass
+    else:
+        lookup = "default"
+    
+    return VOICE_CALIBRATION.get(lookup, VOICE_CALIBRATION["default"])
+
+
+def _trim_to_budget(text: str, budget_secs: float, openrouter_key: str, cps: float = 15.1) -> str:
     """
     Shorten text to fit within budget_secs at natural speaking rate.
 
@@ -1439,7 +1491,7 @@ def _trim_to_budget(text: str, budget_secs: float, openrouter_key: str) -> str:
         return text  # fits, no action needed
 
     # Hard truncation fallback: keep words up to character budget
-    char_budget = int(effective_budget * XTTS_CHARS_PER_SEC)
+    char_budget = int(effective_budget * cps)
     truncated = text[:char_budget].rsplit(" ", 1)[0].rstrip(".,;:")
 
     if not openrouter_key.strip():
@@ -1494,6 +1546,7 @@ def apply_timing_budget(
     segments: list,
     logs: list,
     openrouter_key: str = "",
+    cps: float = 15.1,
 ) -> tuple[list, list]:
     """
     Pre-flight pass: measure source speaking rate, predict synthesis duration,
@@ -1520,13 +1573,13 @@ def apply_timing_budget(
         if not text:
             continue
 
-        estimated = _estimate_synth_duration(text)
+        estimated = _estimate_synth_duration(text, cps=cps)
         effective_budget = slot_dur * MAX_ATEMPO
-
+ 
         if estimated > effective_budget:
             overflow_count += 1
             original_len = len(text)
-            text = _trim_to_budget(text, slot_dur, openrouter_key)
+            text = _trim_to_budget(text, slot_dur, openrouter_key, cps=cps)
             segments[i] = {**seg, "text": text}
             if len(text) < original_len:
                 trimmed_count += 1
@@ -2827,12 +2880,29 @@ def run_pipeline(
         if resume_idx <= stage_order["translate"]:
             progress(0.4, desc="Translating…")
             try:
+                # Select merge config based on engine
+                m_cfg = _get_merge_config(tts_engine)
+                
                 translated, logs = translate_segments(
-                    cast(list, segments), logs, openrouter_key=openrouter_key
+                    cast(list, segments),
+                    logs,
+                    openrouter_key=openrouter_key,
+                    merge_config=m_cfg,
                 )
                 progress(0.5, desc="Checking timing budget…")
+                # Detect current active voice for calibration
+                active_voice = "default"
+                if tts_engine.startswith("Kokoro"):
+                    active_voice = kokoro_voice
+                elif tts_engine.startswith("Edge"):
+                    active_voice = edge_tts_voice
+                elif tts_engine.startswith("Google"):
+                    active_voice = google_tts_voice_name
+                
+                cps = _get_cps_for_voice(tts_engine, active_voice)
+                
                 translated, logs = apply_timing_budget(
-                    translated, logs, openrouter_key=openrouter_key
+                    translated, logs, openrouter_key=openrouter_key, cps=cps
                 )
             except PipelineError:
                 raise

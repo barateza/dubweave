@@ -40,7 +40,7 @@
     {
       "type": "gerund",
       "note": "PT-PT 'a + infinitive' → PT-BR gerund. Handled as special case in benchmark.",
-      "verbs": ["verificar","dizer","ir","ter","ser","estar","ver","vir","dar",
+      "verbs": ["verificar","fazer","dizer","ir","ter","ser","estar","ver","vir","dar",
                 "saber","poder","querer","ficar","falar","pensar","olhar","ouvir","sentir",
                 "aprender","entender","perceber","mostrar","colocar","pedir","deixar",
                 "ajudar","começar","continuar","precisar","tentar","achar","trazer",

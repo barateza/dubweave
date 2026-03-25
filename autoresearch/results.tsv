@@ -1,59 +1,69 @@
-timestamp	status	S	fit	boundary	sweet	over	n_segs	min_words	max_words	max_duration	chars_per_sec	description
-2026-03-21T15:14:21	BASELINE	0.50534	0.2733	0.9843	0.6202	0.051	2667	4	40		14.5	original hardcoded defaults
-2026-03-21T15:16:25	DISCARD	0.50534	0.2733	0.9843	0.6202	0.051	2667	4	40		14.5	raise chars_per_sec to 16.0 — calibration test
-2026-03-21T15:19:58	KEEP	0.55229	0.3907	0.9843	0.6202	0.051	2667	4	40		16.0	raise chars_per_sec to 16.0 -- calibration test
-2026-03-21T15:20:43	KEEP	0.60553	0.5238	0.9843	0.6202	0.051	2667	4	40		17.5	raise chars_per_sec to 17.5 -- pushing calibration
-2026-03-21T15:21:46	KEEP	0.66372	0.6693	0.9843	0.6202	0.051	2667	4	40		19.0	raise chars_per_sec to 19.0
-2026-03-21T15:22:06	KEEP	0.70797	0.7799	0.9843	0.6202	0.051	2667	4	40		20.5	raise chars_per_sec to 20.5
-2026-03-21T15:22:16	KEEP	0.74861	0.8815	0.9843	0.6202	0.051	2667	4	40		22	raise chars_per_sec to 22
-2026-03-21T15:22:37	KEEP	0.75821	0.9055	0.9843	0.6202	0.051	2667	4	40		22.5	raise chars_per_sec to 22.5
-2026-03-21T15:22:55	KEEP	0.76466	0.9216	0.9843	0.6202	0.051	2667	4	40		23.0	raise chars_per_sec to 23.0
-2026-03-21T15:23:04	KEEP	0.76961	0.934	0.9843	0.6202	0.051	2667	4	40		23.5	raise chars_per_sec to 23.5
-2026-03-21T15:23:18	KEEP	0.77351	0.9438	0.9843	0.6202	0.051	2667	4	40		24.0	raise chars_per_sec to 24.0
-2026-03-21T15:23:30	KEEP	0.77786	0.9546	0.9843	0.6202	0.051	2667	4	40		24.5	raise chars_per_sec to 24.5
-2026-03-21T15:23:43	KEEP	0.78101	0.9625	0.9843	0.6202	0.051	2667	4	40		25.0	raise chars_per_sec to 25.0
-2026-03-21T15:25:32	DISCARD	0.77714	0.9645	0.8999	0.6714	0.015	2876	4	40	7.0	25.0	max_duration 7.0
-2026-03-21T15:26:16	DISCARD	0.77511	0.9635	0.9551	0.6129	0.0226	2738	4	40	10.0	25.0	increase max_duration to 10.0
-2026-03-21T15:27:38	KEEP	0.80699	0.9774	0.9806	0.7118	0.0708	2217	8	40		25.0	min_words 8, max_words 40, max_duration null
-2026-03-21T15:28:28	DISCARD	0.78807	0.9892	0.9719	0.6412	0.1088	1848	12	40		25.0	raise min_words from 8 to 12
-2026-03-21T15:29:14	DISCARD	0.78807	0.9892	0.9719	0.6412	0.1088	1848	12	40		25.0	min_words 8, max_words 30
-2026-03-21T15:29:40	DISCARD	0.80217	0.9788	0.9504	0.7131	0.0522	2259	8	30		25.0	min_words 8, max_words 30
-2026-03-21T15:30:48	DISCARD	0.80419	0.9785	0.9677	0.7091	0.0641	2231	8	35		25.0	min_words 8, max_words 35
-2026-03-21T15:47:12	DISCARD	0.79811	0.9708	0.9832	0.6809	0.0624	2435	6	40		25.0	autosearch: min=6 max=40 max_dur=None
-2026-03-21T15:47:25	DISCARD	0.79811	0.9708	0.9832	0.6809	0.0624	2435	6	40		25.0	autosearch: min=6 max=40 max_dur=None
-2026-03-21T15:47:26	DISCARD	0.80691	0.981	0.9791	0.7099	0.0774	2106	9	40		25.0	autosearch: min=9 max=40 max_dur=None
-2026-03-21T15:47:26	DISCARD	0.80561	0.9861	0.9776	0.7014	0.0859	2013	10	40		25.0	autosearch: min=10 max=40 max_dur=None
-2026-03-21T15:47:26	DISCARD	0.80514	0.9743	0.9816	0.7066	0.0664	2335	7	40		25.0	autosearch: min=7 max=40 max_dur=None
-2026-03-21T15:47:26	KEEP	0.8083	0.9773	0.9846	0.7135	0.0716	2206	8	45		25.0	autosearch: min=8 max=45 max_dur=None
-2026-03-21T15:47:26	KEEP	0.80914	0.9773	0.9882	0.7135	0.0719	2199	8	50		25.0	autosearch: min=8 max=50 max_dur=None
-2026-03-21T15:47:26	DISCARD	0.80419	0.9785	0.9677	0.7091	0.0641	2231	8	35		25.0	autosearch: min=8 max=35 max_dur=None
-2026-03-21T15:47:26	DISCARD	0.79134	0.9789	0.9102	0.6983	0.0236	2327	8	40	8.5	25.0	autosearch: min=8 max=40 max_dur=8.5
-2026-03-21T15:47:26	DISCARD	0.79534	0.9788	0.9225	0.7029	0.0251	2309	8	40	9.0	25.0	autosearch: min=8 max=40 max_dur=9.0
-2026-03-21T15:50:06	DISCARD	0.80914	0.9773	0.9882	0.7135	0.0719	2199	8	50		25.0	min_words=6: looser flush, hypothesis: boundary holds, sweet improves
-2026-03-21T15:50:24	DISCARD	0.79952	0.9706	0.9897	0.6807	0.0633	2418	6	50		25.0	min_words=6: looser flush, hypothesis: boundary holds, sweet improves
-2026-03-21T15:50:46	DISCARD	0.80898	0.9804	0.9876	0.7113	0.079	2089	9	50		25.0	min_words=9: tighter than 8, hypothesis: over stays low, boundary ok
-2026-03-21T15:51:04	DISCARD	0.80809	0.986	0.9865	0.7034	0.0877	1996	10	50		25.0	min_words=10: hypothesis: tighter may reduce sweet but limit over
-2026-03-21T15:51:17	DISCARD	0.8083	0.9773	0.9846	0.7135	0.0716	2206	8	45		25.0	max_words=45: hypothesis: looser cap than 40, preserve boundary
-2026-03-21T15:51:31	DISCARD	0.80419	0.9785	0.9677	0.7091	0.0641	2231	8	35		25.0	max_words=35: hypothesis: tighter cap avoids run-ons, check boundary
-2026-03-21T15:51:51	DISCARD	0.79134	0.9789	0.9102	0.6983	0.0236	2327	8	50	8.5	25.0	max_duration=8.5: hypothesis: avoid extreme overlong segments
-2026-03-21T15:52:00	DISCARD	0.79534	0.9788	0.9225	0.7029	0.0251	2309	8	50	9.0	25.0	max_duration=9.0: hypothesis: slightly looser cap than 8.5
-2026-03-21T15:52:18	DISCARD	0.79521	0.9715	0.9715	0.677	0.055	2455	6	35		25.0	min_words=6+max_words=35: combo hypothesis
-2026-03-21T19:44:01	BASELINE	0.80932	0.9777	0.9882	0.7135	0.0719	2199	8	50		25.0		Loop 1 v2 baseline: gap_sec=null, inherits v1 best
-2026-03-21T19:44:10	KEEP	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	gap_sec=2.0: hypothesis: large gap respects paragraph breaks and increases sweet without harming boundary
-2026-03-21T19:44:48	DISCARD	0.79889	0.9704	0.9889	0.6782	0.0604	2433	6	50		25.0	2.0	gap_sec=2.0, min_words=6: hypothesis: relaxed floor coalesces punctuated fragments and improves sweet
-2026-03-21T19:45:14	DISCARD	0.80656	0.9739	0.9884	0.7055	0.0647	2333	7	50		25.0	2.0	gap_sec=2.0, min_words=7: hypothesis: slight lowering of floor merges useful fragments, improving sweet without harming boundary
-2026-03-21T19:45:33	DISCARD	0.80916	0.977	0.9874	0.7132	0.068	2221	8	50		25.0	1.5	gap_sec=1.5, min_words=8: hypothesis: slightly weaker gap retains beneficial merges while keeping sweet high
-2026-03-21T19:45:48	KEEP	0.80973	0.977	0.9874	0.7159	0.0687	2214	8	50		25.0	3.0	gap_sec=3.0, min_words=8: hypothesis: larger gap further improves sweet by honoring broader paragraph breaks
-2026-03-21T19:46:20	DISCARD	0.7992	0.9703	0.9889	0.6796	0.0605	2428	6	50		25.0	3.0	gap_sec=3.0, min_words=6: hypothesis: with larger gap, relaxed floor may further improve sweet
-2026-03-21T19:46:40	DISCARD	0.80689	0.9738	0.9884	0.707	0.0649	2328	7	50		25.0	3.0	gap_sec=3.0, min_words=7: hypothesis: slight lowering of floor under large gap may coalesce useful fragments
-2026-03-21T19:47:00	DISCARD	0.80838	0.9851	0.9856	0.7056	0.0845	2011	10	50		25.0	3.0	gap_sec=3.0, min_words=10: hypothesis: tighter floor may reduce over and keep boundary while preserving sweet
-2026-03-21T19:47:24	DISCARD	0.80885	0.977	0.9838	0.7158	0.0685	2220	8	45		25.0	3.0	gap_sec=3.0, max_words=45: hypothesis: slightly tighter max_words reduces run-ons while preserving sweet
-2026-03-21T19:47:43	KEEP	0.81097	0.9769	0.9918	0.7164	0.0684	2207	8	55		25.0	3.0	gap_sec=3.0, max_words=55: hypothesis: relaxing max_words allows longer merges with gap guard, improving sweet
-2026-03-21T19:48:09	DISCARD	0.81097	0.9769	0.9918	0.7164	0.0684	2207	8	55		25.0	2.9	gap_sec=2.9: hypothesis: slight reduction preserves sweet while improving boundary fit
-2026-03-21T19:48:25	DISCARD	0.8108	0.9769	0.9918	0.716	0.069	2204	8	55		25.0	3.1	gap_sec=3.1: hypothesis: slight increase may capture wider paragraph breaks and improve sweet
-2026-03-21T19:52:40	KEEP	0.81155	0.9768	0.9946	0.7163	0.069	2203	8	60		25.0	3.0	gap_sec=3.0, max_words=60: hypothesis: trend continues — allowing longer merges increases sweet and S
-2026-03-21T19:53:17	KEEP	0.81212	0.9768	0.9968	0.7162	0.0687	2199	8	65		25.0	3.0	gap_sec=3.0, max_words=65: hypothesis: trend continues further — allow even longer merges to boost sweet
-2026-03-21T19:54:01	DISCARD	0.8106	0.9777	0.9927	0.7141	0.0716	2193	8	55		25.0		validation: max_words=55, gap_sec=null — hypothesis: if S unchanged, gap_sec was redundant at max=55
-2026-03-21T19:59:48	KEEP	0.81215	0.9768	0.9973	0.7161	0.0692	2198	8	70		25.0	3.0	gap_sec=3.0, max_words=70: hypothesis: push max_words to 70 to see if S continues to climb or boundary flattens
-2026-03-21T20:00:06	KEEP	0.81243	0.9768	0.9982	0.716	0.0683	2197	8	80		25.0	3.0	gap_sec=3.0, max_words=80: hypothesis: push to 80 to find rollover where boundary flattens and over rises
-2026-03-21T20:06:37	KEEP	0.81265	0.9768	0.9986	0.7164	0.0683	2197	8	100		25.0	3.0	gap_sec=3.0, max_words=100: hypothesis: push max_words to 100 to find structural limit
+timestamp	status	S	fit	boundary	sweet	over	n_segs	min_words	max_words	max_duration	chars_per_sec	gap_sec	voice	description
+2026-03-25T00:35:15	BASELINE	0.80932	0.9777	0.9882	0.7135	0.0719	2199	8	50		25.0		pt-BR-FranciscaNeural	Baseline for pt-BR-FranciscaNeural (proxy cps=25.0)
+2026-03-25T00:35:15	DISCARD	0.65512	0.9137	0.6844	0.4834	0.0229	3672	8	50		25.0	0.1	pt-BR-FranciscaNeural	gap_sec=0.1: phase 1 sweep (proxy)
+2026-03-25T00:35:15	DISCARD	0.70221	0.9365	0.7631	0.5584	0.0276	3229	8	50		25.0	0.3	pt-BR-FranciscaNeural	gap_sec=0.3: phase 1 sweep (proxy)
+2026-03-25T00:35:16	DISCARD	0.77364	0.9694	0.8919	0.6686	0.0422	2580	8	50		25.0	0.5	pt-BR-FranciscaNeural	gap_sec=0.5: phase 1 sweep (proxy)
+2026-03-25T00:35:16	DISCARD	0.80078	0.9763	0.9629	0.7016	0.0586	2319	8	50		25.0	0.7	pt-BR-FranciscaNeural	gap_sec=0.7: phase 1 sweep (proxy)
+2026-03-25T00:35:16	DISCARD	0.80632	0.9765	0.9805	0.7088	0.066	2256	8	50		25.0	1.0	pt-BR-FranciscaNeural	gap_sec=1.0: phase 1 sweep (proxy)
+2026-03-25T00:35:16	DISCARD	0.80834	0.9771	0.9857	0.7112	0.0673	2230	8	50		25.0	1.2	pt-BR-FranciscaNeural	gap_sec=1.2: phase 1 sweep (proxy)
+2026-03-25T00:35:16	DISCARD	0.80916	0.977	0.9874	0.7132	0.068	2221	8	50		25.0	1.5	pt-BR-FranciscaNeural	gap_sec=1.5: phase 1 sweep (proxy)
+2026-03-25T00:35:16	KEEP	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	pt-BR-FranciscaNeural	gap_sec=2.0: phase 1 sweep (proxy)
+2026-03-25T00:35:16	BASELINE	0.80932	0.9777	0.9882	0.7135	0.0719	2199	8	50		25.0		pt-BR-AntonioNeural	Baseline for pt-BR-AntonioNeural (proxy cps=25.0)
+2026-03-25T00:35:16	DISCARD	0.65512	0.9137	0.6844	0.4834	0.0229	3672	8	50		25.0	0.1	pt-BR-AntonioNeural	gap_sec=0.1: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.70221	0.9365	0.7631	0.5584	0.0276	3229	8	50		25.0	0.3	pt-BR-AntonioNeural	gap_sec=0.3: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.77364	0.9694	0.8919	0.6686	0.0422	2580	8	50		25.0	0.5	pt-BR-AntonioNeural	gap_sec=0.5: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.80078	0.9763	0.9629	0.7016	0.0586	2319	8	50		25.0	0.7	pt-BR-AntonioNeural	gap_sec=0.7: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.80632	0.9765	0.9805	0.7088	0.066	2256	8	50		25.0	1.0	pt-BR-AntonioNeural	gap_sec=1.0: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.80834	0.9771	0.9857	0.7112	0.0673	2230	8	50		25.0	1.2	pt-BR-AntonioNeural	gap_sec=1.2: phase 1 sweep (proxy)
+2026-03-25T00:35:17	DISCARD	0.80916	0.977	0.9874	0.7132	0.068	2221	8	50		25.0	1.5	pt-BR-AntonioNeural	gap_sec=1.5: phase 1 sweep (proxy)
+2026-03-25T00:35:17	KEEP	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	pt-BR-AntonioNeural	gap_sec=2.0: phase 1 sweep (proxy)
+2026-03-25T00:35:18	BASELINE	0.80932	0.9777	0.9882	0.7135	0.0719	2199	8	50		25.0		pt-BR-ThalitaNeural	Baseline for pt-BR-ThalitaNeural (proxy cps=25.0)
+2026-03-25T00:35:18	DISCARD	0.65512	0.9137	0.6844	0.4834	0.0229	3672	8	50		25.0	0.1	pt-BR-ThalitaNeural	gap_sec=0.1: phase 1 sweep (proxy)
+2026-03-25T00:35:18	DISCARD	0.70221	0.9365	0.7631	0.5584	0.0276	3229	8	50		25.0	0.3	pt-BR-ThalitaNeural	gap_sec=0.3: phase 1 sweep (proxy)
+2026-03-25T00:35:18	DISCARD	0.77364	0.9694	0.8919	0.6686	0.0422	2580	8	50		25.0	0.5	pt-BR-ThalitaNeural	gap_sec=0.5: phase 1 sweep (proxy)
+2026-03-25T00:35:18	DISCARD	0.80078	0.9763	0.9629	0.7016	0.0586	2319	8	50		25.0	0.7	pt-BR-ThalitaNeural	gap_sec=0.7: phase 1 sweep (proxy)
+2026-03-25T00:35:18	DISCARD	0.80632	0.9765	0.9805	0.7088	0.066	2256	8	50		25.0	1.0	pt-BR-ThalitaNeural	gap_sec=1.0: phase 1 sweep (proxy)
+2026-03-25T00:35:18	DISCARD	0.80834	0.9771	0.9857	0.7112	0.0673	2230	8	50		25.0	1.2	pt-BR-ThalitaNeural	gap_sec=1.2: phase 1 sweep (proxy)
+2026-03-25T00:35:19	DISCARD	0.80916	0.977	0.9874	0.7132	0.068	2221	8	50		25.0	1.5	pt-BR-ThalitaNeural	gap_sec=1.5: phase 1 sweep (proxy)
+2026-03-25T00:35:19	KEEP	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	pt-BR-ThalitaNeural	gap_sec=2.0: phase 1 sweep (proxy)
+2026-03-25T00:37:06	DISCARD	0.45333	0.0865	0.9874	0.7147	0.068	2219	8	50		11.1	2.0	pt-BR-FranciscaNeural	cps_sweep: 11.1
+2026-03-25T00:37:07	DISCARD	0.49029	0.1789	0.9874	0.7147	0.068	2219	8	50		13.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 13.0
+2026-03-25T00:37:07	DISCARD	0.54022	0.3037	0.9874	0.7147	0.068	2219	8	50		15.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 15.0
+2026-03-25T00:37:07	DISCARD	0.65523	0.5913	0.9874	0.7147	0.068	2219	8	50		18.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 18.0
+2026-03-25T00:37:07	DISCARD	0.73166	0.7823	0.9874	0.7147	0.068	2219	8	50		20.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 20.0
+2026-03-25T00:37:07	DISCARD	0.78213	0.9085	0.9874	0.7147	0.068	2219	8	50		22.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 22.0
+2026-03-25T00:37:07	DISCARD	0.80953	0.977	0.9874	0.7147	0.068	2219	8	50		25.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 25.0
+2026-03-25T00:37:07	KEEP	0.8162	0.9937	0.9874	0.7147	0.068	2219	8	50		28.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 28.0
+2026-03-25T00:37:08	KEEP	0.81674	0.995	0.9874	0.7147	0.068	2219	8	50		30.0	2.0	pt-BR-FranciscaNeural	cps_sweep: 30.0
+2026-03-25T00:37:34	DISCARD	0.63753	0.6025	0.9902	0.6164	0.0511	2659	4	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 4
+2026-03-25T00:37:34	DISCARD	0.64772	0.6094	0.9898	0.6483	0.0555	2542	5	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 5
+2026-03-25T00:37:34	DISCARD	0.65684	0.6153	0.9889	0.6782	0.0604	2433	6	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 6
+2026-03-25T00:37:34	DISCARD	0.66459	0.6189	0.9884	0.7055	0.0647	2333	7	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 7
+2026-03-25T00:37:34	DISCARD	0.66857	0.6246	0.9874	0.7147	0.068	2219	8	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 8
+2026-03-25T00:37:34	DISCARD	0.66866	0.6297	0.9867	0.7108	0.0759	2109	9	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 9
+2026-03-25T00:37:35	DISCARD	0.67021	0.64	0.9856	0.7046	0.0834	2014	10	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 10
+2026-03-25T00:37:35	DISCARD	0.66573	0.6465	0.9845	0.6822	0.0952	1932	11	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 11
+2026-03-25T00:37:35	DISCARD	0.65846	0.6522	0.9832	0.649	0.1049	1849	12	50		18.3	2.0	pt-BR-FranciscaNeural	min_words_sweep: 12
+2026-03-25T00:37:56	DISCARD	0.77492	0.8905	0.9874	0.7147	0.068	2219	8	50		21.6	2.0	pt-BR-ThalitaNeural	min_words_sweep_thalita: 8
+2026-03-25T00:37:56	DISCARD	0.77544	0.8966	0.9867	0.7108	0.0759	2109	9	50		21.6	2.0	pt-BR-ThalitaNeural	min_words_sweep_thalita: 9
+2026-03-25T00:37:56	DISCARD	0.77666	0.9062	0.9856	0.7046	0.0834	2014	10	50		21.6	2.0	pt-BR-ThalitaNeural	min_words_sweep_thalita: 10
+2026-03-25T00:37:56	DISCARD	0.77174	0.9115	0.9845	0.6822	0.0952	1932	11	50		21.6	2.0	pt-BR-ThalitaNeural	min_words_sweep_thalita: 11
+2026-03-25T00:37:56	DISCARD	0.76468	0.9178	0.9832	0.649	0.1049	1849	12	50		21.6	2.0	pt-BR-ThalitaNeural	min_words_sweep_thalita: 12
+2026-03-25T11:04:30	DISCARD	0.66888	0.6432	0.9763	0.7028	0.0818	2029	10	40		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 40
+2026-03-25T11:04:30	DISCARD	0.67021	0.64	0.9856	0.7046	0.0834	2014	10	50		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 50
+2026-03-25T11:04:30	DISCARD	0.67262	0.6405	0.9935	0.7054	0.0834	2003	10	60		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 60
+2026-03-25T11:04:30	DISCARD	0.67316	0.6398	0.9965	0.7059	0.0835	1999	10	70		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 70
+2026-03-25T11:04:30	DISCARD	0.6734	0.6396	0.9975	0.7057	0.0826	1998	10	80		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 80
+2026-03-25T11:04:30	DISCARD	0.67345	0.6391	0.998	0.7062	0.0826	1998	10	100		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 100
+2026-03-25T11:04:30	DISCARD	0.67366	0.6395	0.9985	0.7061	0.0826	1997	10	120		18.3	2.0	pt-BR-FranciscaNeural	max_words_sweep: 120
+2026-03-25T11:05:59	DISCARD	0.77666	0.9062	0.9856	0.7046	0.0834	2014	10	50		21.6	2.0	pt-BR-ThalitaNeural	max_words_sweep_thalita: 50
+2026-03-25T11:05:59	DISCARD	0.77941	0.9055	0.9965	0.7059	0.0835	1999	10	70		21.6	2.0	pt-BR-ThalitaNeural	max_words_sweep_thalita: 70
+2026-03-25T11:05:59	DISCARD	0.77995	0.9054	0.998	0.7062	0.0826	1998	10	100		21.6	2.0	pt-BR-ThalitaNeural	max_words_sweep_thalita: 100
+2026-03-25T11:05:59	DISCARD	0.78002	0.9054	0.9985	0.7061	0.0826	1997	10	150		21.6	2.0	pt-BR-ThalitaNeural	max_words_sweep_thalita: 150
+2026-03-25T11:07:54	DISCARD	0.67345	0.6391	0.998	0.7062	0.0826	1998	10	100		18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: None
+2026-03-25T11:07:55	DISCARD	0.62416	0.6713	0.4955	0.9306	0.0084	3197	10	100	3.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 3.0
+2026-03-25T11:07:55	DISCARD	0.64218	0.6699	0.5883	0.9126	0.0102	2757	10	100	4.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 4.0
+2026-03-25T11:07:55	DISCARD	0.65458	0.6627	0.6707	0.8925	0.0128	2502	10	100	5.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 5.0
+2026-03-25T11:07:55	DISCARD	0.66907	0.6621	0.7624	0.8618	0.0181	2323	10	100	6.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 6.0
+2026-03-25T11:07:55	DISCARD	0.66837	0.6619	0.8237	0.799	0.0207	2224	10	100	7.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 7.0
+2026-03-25T11:07:55	DISCARD	0.66084	0.6502	0.9273	0.6914	0.0392	2090	10	100	10.0	18.3	2.0	pt-BR-FranciscaNeural	max_dur_sweep: 10.0

@@ -1,7 +1,8 @@
 {
-  "min_words": 8,
+  "min_words": 10,
   "max_words": 100,
-  "max_duration": null,
-  "chars_per_sec": 25.0,
-  "gap_sec": 3.0
+  "max_duration": 10.0,
+  "chars_per_sec": 18.3,
+  "gap_sec": 2.0,
+  "voice": "pt-BR-FranciscaNeural"
 }
