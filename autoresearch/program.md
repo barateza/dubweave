@@ -1,158 +1,72 @@
-# Dubweave — Autoresearch Loop 1 v2: Gap-Aware Merge Optimization
+# Dubweave — Autoresearch Loop 1 v2: Edge-TTS Merge Sweep
 
 ## Your role
 
-You are an autonomous research agent optimizing the segment merge parameters
-for the Dubweave PT-BR dubbing pipeline. You run experiments, evaluate results,
-and keep improvements. You work in a loop without human input until you find
-no further improvement or reach 50 experiments.
+You are an autonomous research agent whose job is to finish the Edge-TTS merge optimization that stalled in Loop 1. Loops 2 and 3 are already clean, the handoff data matches every number in the TSVs, Hermetic translation normalization is at 90% 4+-score coverage, and the Kokoro baseline (Loop 1 v2) is documented and stable with gap_sec=3.0, max_words=100 and chars_per_sec=25.0. What remains is a repeatable way to merge segments so the newly calibrated Edge-TTS voices (Francisca/Antonio @ 11.1 cps and Thalita @ 13.1 cps) actually fit into the original Kokoro slots.
 
-## Context: why this loop exists
+## Why this loop exists now
 
-Loop 1 v1 exhausted the {min_words, max_words, max_duration} search space.
-The best result was S = 0.80914 (min_words=8, max_words=50, boundary=0.9882,
-sweet=0.7135). `sweet` (71.4%) is where meaningful headroom remains.
+- The Edge-TTS merge tuner stopped with `merge_config.json` still pointing at the discarded `max_duration=10.0` experiment and `chars_per_sec=18.3`. That experiment produced misleading `fit` numbers because it pretended the Edge voices were faster than they really are. Production Edge runs still send `MERGE_CONFIGS["edge"]` through Kokoro-like parameters, so heavy trimming and truncation happen on every run.
+- At the real production rate (11.1 cps, the calibrated number stored in `VOICE_CALIBRATION` inside `app.py` for Francisca and Antonio), the benchmark reports `fit≈0.086`. In plain terms, roughly 91% of the Kokoro-style merged segments are too long for Edge-TTS to synthesize into their slots. That is not a bug in the benchmark—it is the exact pain point we need to fix.
 
-A new parameter, `gap_sec`, is now active in `_merge_segments`. When the
-silence between two consecutive Whisper segments exceeds `gap_sec`, the
-current buffer is force-flushed before the next segment is appended. This
-respects natural speaker pauses as hard utterance boundaries — independent
-of punctuation or word count.
+## True baseline you must restore before running experiments
 
-## What you are optimizing
+Reset `merge_config.json` to the values that match the Edge-TTS production routing in `app.py`. This file is the only mutable artifact for this loop. The baseline configuration is:
 
-The file `merge_config.json` controls how raw Whisper segments are merged into
-translation utterances before synthesis. You edit this file, run the benchmark,
-and decide whether to keep or discard each change.
+```
+{
+  "min_words":    10,
+  "max_words":    100,
+  "max_duration": null,
+  "chars_per_sec": 11.1,
+  "gap_sec":      2.0,
+  "voice":        "pt-BR-FranciscaNeural"
+}
+```
 
-## The metric
+- `min_words=10` reflects the Kokoro baseline that already produces readable utterances. Keep it locked unless a future sweep proves otherwise.
+- `max_duration=null` means we rely on word counts and silence gaps instead of a hard second-based cap.
+- `chars_per_sec` must stay at 11.1 while working on the Francisca/Antonio branch. The Thalita calibration (13.1 cps) is noted in `VOICE_CALIBRATION`, but the current delivery pipeline still routes via Francisca, so focus there.
+- `gap_sec=2.0` is the current production gap. You will sweep it tighter to see where silence-triggered flushes help your fit.
+- The `voice` field exists so the benchmark logs which routing path you are tuning. Keep it set to Francisca while you are establishing the new merge strategy.
 
-`pixi run python benchmark.py -d "<your hypothesis>"` scores the current config
-and prints a composite score S ∈ [0, 1]. Higher is better.
+After every DISCARD, restore this snippet before running the next experiment. That keeps your baseline clean and keeps the downstream pipeline aligned with what `MERGE_CONFIGS["edge"]` should eventually mirror.
 
-    S = 0.40·fit + 0.25·boundary + 0.25·sweet − 0.10·over
+## Benchmarks and metrics
 
-- fit:      fraction of segments whose predicted synthesis fits in slot
-- boundary: fraction ending on sentence-terminal punctuation (., ?, !, …)
-- sweet:    fraction with duration in [2.5, 8.0] seconds
-- over:     fraction longer than 12 seconds (penalty)
+We still target the composite score `S = fit · 0.40 + boundary · 0.25 + sweet · 0.25 − over · 0.10`. With the 11.1 cps baseline, `fit` starts at ~0.086, which is the immediate limitation Edge synthesis faces; sweet/boundary/over numbers are not terrible, they simply sit behind a `fit` wall.
 
-The benchmark prints KEEP or DISCARD automatically by comparing against the
-best S in results.tsv. It also appends a row to results.tsv.
-
-## The mutable file
-
-Only edit `merge_config.json`. Do not touch any other file.
-
-    {
-      "min_words":    <int>,
-      "max_words":    <int>,
-      "max_duration": <float or null>,
-      "chars_per_sec": <float>,
-      "gap_sec":      <float or null>
-    }
-
-Parameter meanings:
-
-- min_words:    minimum word count before a punctuated segment flushes
-- max_words:    hard flush regardless of punctuation (prevents run-ons)
-- max_duration: flush if merged duration exceeds this (seconds). null = disabled
-- chars_per_sec: Kokoro speech rate for timing prediction. LOCKED at 25.0.
-- gap_sec:      NEW — flush when silence between Whisper segments ≥ gap_sec.
-                null = disabled (original behaviour). Unit: seconds.
-
-## Current best (Loop 1 v1 result — the baseline for this loop)
-
-    S = 0.80914  →  min_words=8, max_words=50, max_duration=null, gap_sec=null, chars_per_sec=25.0
-    fit=0.9773, boundary=0.9882, sweet=0.7135, over=0.0719, n_segs=2199
-
-## Before your first experiment
-
-Run the preview sweep to understand how gap_sec moves the needle:
-
-  pixi run python benchmark.py --sweep
-
-This prints a table of S, fit, boundary, sweet, over for gap_sec in
-{null, 0.3, 0.5, 0.7, 1.0, 1.2, 1.5, 2.0} without writing to results.tsv.
-Use this to pick your first real experiment.
-
-## How gap_sec affects the metrics
-
-- null — baseline; no change from v1 best
-
-- 0.3–0.5 s — aggressive splitting; many tiny sub-2.5s fragments → sweet likely drops
-
-- 0.7–1.0 s — targets mid-sentence pauses; sweet may improve; boundary could dip if gaps mid-sentence
-
-- 1.2–1.5 s — targets paragraph-level pauses; likely boundary-safe zone
-
-- 2.0 s+ — only fires at very long topic transitions; low impact
+Your job is to raise `fit` by shortening utterances via `max_words` and intelligent gap flushing. If `fit` improves, the composite `S` should rise enough to flip KEEP on the benchmark. The benchmark will automatically append each row to `results.tsv` and print KEEP/DISCARD for you.
 
 ## Search strategy
 
-### Phase 1 — gap_sec solo sweep (≤ 15 experiments)
+1. **Max words sweep (long → short).** Starting from the baseline `max_words=100`, iteratively edit `merge_config.json` to try the tighter caps {40, 35, 30, 25, 20}. Run a benchmark for each value while keeping `gap_sec=2.0`. This shrinks utterances by forcing earlier flushes, which is the main tool for raising `fit` at 11.1 cps.
+2. **Gap_sec refinement.** Once you have signal from the max_words sweep, run the same downward sweep while tightening `gap_sec` in {1.5, 1.0}. The idea is to flush at shorter silences so you break long Kokoro clusters into smaller Edge-friendly chunks. For each gap value, re-evaluate the max_words series (so you end up exploring the matrix gap × max_words in a targeted way). Always keep `min_words=10`, `max_duration=null`, and `chars_per_sec=11.1`.
+3. **CPS sanity.** Never change `chars_per_sec` from 11.1 while tuning Edge-Francisca/Antonio. If you eventually tune Thalita, spin up a new loop referencing 13.1 cps.
 
-With {min_words=8, max_words=50, max_duration=null, chars_per_sec=25.0} fixed:
+The goal is to find the shortest `max_words` that still keeps polite transitions, then confirm what `gap_sec` prevents re-joining excessively long spans. Keep track of the best `max_words`/`gap_sec` pair and make sure to update `merge_config.json` when you find a KEEP configuration that beats the current best `S`.
 
-1. Start with gap_sec=1.0 — middle of the plausible range.
-2. If sweet improves and boundary holds → try lower: 0.7, then 0.5.
-3. If sweet drops or boundary drops → try higher: 1.2, then 1.5, then 2.0.
-4. Note the best gap_sec value found.
+## Running experiments
 
-### Phase 2 — gap_sec × min_words interaction (≤ 20 experiments)
+1. Edit `merge_config.json` to one of the target parameter sets (max_words/gap combinations listed above). `min_words`, `max_duration`, `chars_per_sec`, and `voice` stay constant.
+2. Run the benchmark with a hypothesis-laden description:
 
-Hypothesis: gap flushes create some short sub-min_words utterances.
-Lowering min_words slightly might help these coalesce when there's no gap.
-
-With the best gap_sec fixed, explore:
-
-- min_words=6 (looser, more fragments merge on punctuation)
-- min_words=7
-- min_words=10 (tighter, fewer small merges)
-
-### Phase 3 — gap_sec × max_words (≤ 10 experiments)
-
-Hypothesis: gap flushes reset the word counter cleanly; max_words may be
-safe to relax or tighten.
-
-- max_words=45 with best gap_sec + min_words
-- max_words=55 with best gap_sec + min_words
-
-### Phase 4 — cleanup (≤ 5 experiments)
-
-Once a promising region is found, try small ±0.1 s perturbations around
-the best gap_sec to find the local optimum.
-
-## Known constraints from Loop 1 v1 (do not re-test these)
-
-- chars_per_sec: LOCKED at 25.0 — do not change.
-- max_duration=7.0, 8.5, 9.0 → boundary drops badly → never re-test max_duration.
-- min_words > 10 → over spikes → avoid.
-- max_words < 40 → boundary drops (mid-sentence cap) → avoid.
-- Combinations tested without gap_sec are exhausted. Only add gap_sec now.
+```
+pixi run python benchmark.py -d "gap_sec=1.5 max_words=30: hypothesis lower gap + tighter max_words raises fit for 11.1 cps"
+```
+3. After the run, inspect the console output. The benchmark prints `fit`, `boundary`, `sweet`, `over`, and `S`, and whether the config is `KEEP` or `DISCARD`. Record the results using your own log format (e.g., `EXP #N: gap_sec=1.5 max_words=30 → S=0.xxx (KEEP) — what changed`).
+4. If the run is a DISCARD, restore the baseline snippet before making the next edit. If it is a KEEP and the `S` beats the previous best, leave the new values in `merge_config.json` so that future runs start from the improved baseline.
+5. You may run `pixi run python benchmark.py --status` at any time to check how many experiments have been logged and where the current best `S` sits. The `--sweep` flag is helpful for previewing `gap_sec` behavior before writing to `results.tsv`.
 
 ## Rules
 
-- Always include a hypothesis in the -d description. Example:
-  -d "gap_sec=1.0: target paragraph pauses; hypothesis: sweet improves, boundary safe"
-- Never change chars_per_sec.
-- Never edit any file other than merge_config.json.
-- After a DISCARD, always restore the last KEEP config before the next experiment.
-- Stop after 50 experiments or if 5 consecutive experiments DISCARD with S < best − 0.005.
-- When done, print a summary: best config found, S achieved, and key findings.
+- Only edit `merge_config.json`. The rest of the repo—including `app.py` and any TSV results—is treated as immutable evidence for this loop.
+- Always include a hypothesis in the `-d` description. That makes your reasoning searchable in the benchmark logs.
+- After each DISCARD, restore the baseline snippet (min_words=10, max_words=100, max_duration=null, chars_per_sec=11.1, gap_sec=2.0, voice=pt-BR-FranciscaNeural). A DISCARD followed by un-restored parameters makes the next run invalid from a comparison standpoint.
+- Stop if you reach 50 experiments or if you hit five DISCARDs in a row with `S` more than 0.005 below the best-known config.
+- When done, report the best config found, its `S`, and the key insight (e.g., "gap_sec=1.0, max_words=30 gave the first fit > 0.6 at 11.1 cps"). That summary closes the loop for whoever follows you.
 
-## Restore last KEEP config
+## After you find an improvement
 
-Read results.tsv, find the last KEEP row, and set merge_config.json to those values.
-Alternatively: `git stash` / `git checkout merge_config.json` if the repo is clean.
-
-## How to check current state
-
-  pixi run python benchmark.py --status
-
-## Experiment log format (for your own notes)
-
-After each run, note:
-    EXP #N: gap_sec=X min_words=Y → S=Z (KEEP/DISCARD) — what changed and why
-
-This helps you avoid re-testing known dead ends.
+- Update `MERGE_CONFIGS["edge"]` in `app.py` so production uses the merged parameters that actually fit 11.1 cps. The `merge_config.json` file is where you experiment, and `MERGE_CONFIGS["edge"]` is where the pipeline reads the result. Keeping both aligned prevents future regressions and the "Edge runs are truncated" symptom from reappearing.
+- If you ever tune Thalita separately, treat it as a new loop with `chars_per_sec=13.1` and the appropriate voice routing.
