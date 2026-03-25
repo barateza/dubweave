@@ -80,6 +80,19 @@ GOOGLE_TTS_LANGUAGE_CODE = os.getenv("GOOGLE_TTS_LANGUAGE_CODE", "pt-BR")
 GOOGLE_TTS_VOICE_TYPE = os.getenv("GOOGLE_TTS_VOICE_TYPE", "Neural2")
 GOOGLE_TTS_VOICE_NAME = os.getenv("GOOGLE_TTS_VOICE_NAME", "pt-BR-Neural2-A")
 
+# Edge TTS config (from .env)
+EDGE_TTS_VOICE_NAME = os.getenv("EDGE_TTS_VOICE_NAME", "pt-BR-FranciscaNeural")
+
+# Known PT-BR Neural voices available via edge-tts (no API key required).
+# FranciscaNeural — female, warm/conversational (best default for dubbed content)
+# AntonioNeural   — male,   natural/neutral
+# ThalitaNeural   — female, energetic/younger cadence
+EDGE_TTS_PT_BR_VOICES: list[str] = [
+    "pt-BR-FranciscaNeural",
+    "pt-BR-AntonioNeural",
+    "pt-BR-ThalitaNeural",
+]
+
 # Known PT-BR voices per Google Cloud TTS model family.
 # Used to populate the UI dropdowns when a valid API key is present.
 GOOGLE_TTS_VOICE_CATALOG: dict[str, list[str]] = {
@@ -1898,6 +1911,167 @@ def synthesize_segments_google_tts(
     return timed_clips, logs
 
 
+def synthesize_segments_edge_tts(
+    segments: list,
+    job_dir: Path,
+    logs: list,
+    voice: str = EDGE_TTS_VOICE_NAME,
+    speed: float = 1.0,
+):
+    """
+    Synthesize PT-BR speech using Microsoft Edge TTS (cloud, no API key, no VRAM).
+
+    Uses the edge-tts package which streams from Microsoft's Neural TTS service.
+    Output is MP3 decoded via ffmpeg to WAV, then timing-adjusted with atempo —
+    identical final contract to the Kokoro and Google TTS paths.
+
+    Voices: pt-BR-FranciscaNeural (F) · pt-BR-AntonioNeural (M) · pt-BR-ThalitaNeural (F)
+    Requires: pip install edge-tts  (add to pixi.toml: edge-tts = "*")
+              Internet access during synthesis.
+    No espeak-ng, no GPU, no model download.
+    """
+    import asyncio
+    import io
+
+    try:
+        import edge_tts  # noqa: PLC0415
+    except ImportError:
+        raise PipelineError(
+            "Synthesize",
+            "edge-tts package not installed. Add 'edge-tts = \"*\"' to pixi.toml "
+            "under [pypi-dependencies] and run 'pixi install'.",
+            recoverable=False,
+        )
+
+    # Convert speed multiplier → SSML signed-percent string
+    rate_pct = round((speed - 1.0) * 100)
+    rate_str = f"{rate_pct:+d}%"
+
+    logs = log(f"🔊 Edge TTS ready (voice={voice}, rate={rate_str})", logs)
+
+    empty = [i for i, s in enumerate(segments) if not s.get("text", "").strip()]
+    if empty:
+        logs = log(f"   ⚠️  {len(empty)} empty segment(s) — skipping", logs)
+    segments = [s for s in segments if s.get("text", "").strip()]
+
+    seg_dir = job_dir / "segments"
+    seg_dir.mkdir(exist_ok=True)
+
+    logs = log(
+        f"🎤 Synthesizing {len(segments)} segments (Edge TTS, up to 16 concurrent)…", logs
+    )
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: list[dict | None] = [None] * len(segments)
+    errors: list[str] = []
+
+    async def _stream_mp3(text: str) -> bytes:
+        communicate = edge_tts.Communicate(text, voice, rate=rate_str)
+        buf = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                buf.write(chunk["data"])
+        return buf.getvalue()
+
+    def _synthesize_one(idx: int, seg: dict) -> dict:
+        out_raw = seg_dir / f"seg_{idx:04d}_raw.wav"
+        out_clip = seg_dir / f"seg_{idx:04d}.wav"
+
+        text = _sanitize_for_tts(seg["text"].strip())
+
+        # Synthesize: stream MP3 from Edge TTS, then decode to WAV via ffmpeg.
+        # ffmpeg is already a pipeline dependency — no new tools needed.
+        try:
+            mp3_bytes = asyncio.run(_stream_mp3(text))
+            if not mp3_bytes:
+                raise RuntimeError("Edge TTS returned empty audio")
+
+            decode = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", "pipe:0",
+                    "-ar", "44100",
+                    "-ac", "1",
+                    str(out_raw),
+                    "-loglevel", "quiet",
+                ],
+                input=mp3_bytes,
+                capture_output=True,
+            )
+            if decode.returncode != 0:
+                raise RuntimeError(
+                    f"ffmpeg MP3 decode failed: {decode.stderr.decode(errors='replace')[:200]}"
+                )
+
+        except Exception as exc:
+            errors.append(f"   ⚠️  Edge TTS failed (segment {idx}): {exc}")
+            # Silent placeholder keeps the timeline intact
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-f", "lavfi",
+                    "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+                    "-t", "0.5",
+                    str(out_raw),
+                    "-loglevel", "quiet",
+                ],
+                capture_output=True,
+            )
+            shutil.copy(str(out_raw), str(out_clip))
+            return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
+
+        # Timing adjustment — same atempo logic as Kokoro / Google TTS paths.
+        orig_dur = seg["end"] - seg["start"]
+        if orig_dur > 0.1:
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "json",
+                    str(out_raw),
+                ],
+                capture_output=True, text=True,
+            )
+            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
+            ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", str(out_raw),
+                    "-filter:a", f"atempo={ratio:.4f}",
+                    "-ar", "44100",
+                    str(out_clip),
+                    "-loglevel", "quiet",
+                ],
+                capture_output=True,
+            )
+        else:
+            shutil.copy(str(out_raw), str(out_clip))
+
+        return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
+
+    total = len(segments)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        future_to_idx = {
+            executor.submit(_synthesize_one, i, seg): i
+            for i, seg in enumerate(segments)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            results[idx] = future.result()
+            completed += 1
+            if completed % 10 == 0 or completed == total:
+                logs = log(f"   Segment {completed}/{total} done…", logs)
+
+    for msg in errors:
+        logs = log(msg, logs)
+
+    logs = log("✅ All segments synthesized (Edge TTS)", logs)
+    return results, logs
+
+
 def synthesize_segments(
     segments: list,
     audio_orig: Path,
@@ -2500,6 +2674,7 @@ def run_pipeline(
     kokoro_voice: str = KOKORO_VOICE,
     google_tts_voice_type: str = GOOGLE_TTS_VOICE_TYPE,
     google_tts_voice_name: str = GOOGLE_TTS_VOICE_NAME,
+    edge_tts_voice: str = EDGE_TTS_VOICE_NAME,
     progress=gr.Progress(),
 ):
     logs = []
@@ -2704,6 +2879,13 @@ def run_pipeline(
                         voice_type=google_tts_voice_type,
                         voice_name=google_tts_voice_name,
                         language_code=GOOGLE_TTS_LANGUAGE_CODE,
+                    )
+                elif tts_engine == "Edge TTS (cloud, no key)":
+                    timed_clips, logs = synthesize_segments_edge_tts(
+                        utterances,
+                        job_dir,
+                        logs,
+                        voice=edge_tts_voice,
                     )
                 else:
                     timed_clips, logs = synthesize_segments(
@@ -3236,12 +3418,17 @@ def build_ui():
               Voices: <code>pf_dora</code> (female) · <code>pm_alex</code> (male) · <code>pm_santa</code> (male)<br>
               Requires: <code>pip install kokoro soundfile</code> + espeak-ng installed.<br>
               <br>
+              <strong style="color:#7c6dff;">Edge TTS</strong> — cloud Neural voices, no API key, no VRAM.
+              Quality above Kokoro; requires internet during synthesis.<br>
+              Voices: <code>FranciscaNeural</code> (F) · <code>AntonioNeural</code> (M) · <code>ThalitaNeural</code> (F)<br>
+              Requires: <code>edge-tts = "*"</code> in pixi.toml + internet.<br>
+              <br>
               <strong style="color:#e8e8f0;">XTTS v2</strong> — clones the original speaker's voice. Slower, uses ~4GB VRAM.
               Best when matching the original speaker matters more than speed.{_google_note}
             </div>
             """)
 
-            _tts_choices = ["Kokoro (fast, PT-BR native)", "XTTS v2 (voice clone)"]
+            _tts_choices = ["Kokoro (fast, PT-BR native)", "Edge TTS (cloud, no key)", "XTTS v2 (voice clone)"]
             if GOOGLE_TTS_API_KEY:
                 _tts_choices.append("Google Cloud TTS")
 
@@ -3255,6 +3442,12 @@ def build_ui():
                 value="pf_dora",
                 label="Kokoro voice",
                 visible=True,
+            )
+            edge_voice_input = gr.Dropdown(
+                choices=EDGE_TTS_PT_BR_VOICES,
+                value=EDGE_TTS_VOICE_NAME,
+                label="Edge TTS voice",
+                visible=False,
             )
 
             # ── Google Cloud TTS controls (shown only when Google TTS is selected) ──
@@ -3302,13 +3495,18 @@ def build_ui():
 
             def _on_tts_engine_change(engine):
                 is_kokoro = engine == "Kokoro (fast, PT-BR native)"
+                is_edge   = engine == "Edge TTS (cloud, no key)"
                 is_google = engine == "Google Cloud TTS"
-                return gr.update(visible=is_kokoro), gr.update(visible=is_google)
+                return (
+                    gr.update(visible=is_kokoro),
+                    gr.update(visible=is_edge),
+                    gr.update(visible=is_google),
+                )
 
             tts_engine_input.change(
                 fn=_on_tts_engine_change,
                 inputs=[tts_engine_input],
-                outputs=[kokoro_voice_input, google_tts_row],
+                outputs=[kokoro_voice_input, edge_voice_input, google_tts_row],
             )
 
             def _update_google_voice_sample(voice_name):
@@ -3408,6 +3606,7 @@ def build_ui():
                 kokoro_voice_input,
                 google_voice_type_input,
                 google_voice_input,
+                edge_voice_input,
             ],
             outputs=[video_output, log_output],
             show_progress="minimal",
