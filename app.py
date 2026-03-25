@@ -1199,9 +1199,9 @@ MERGE_CONFIGS = {
         "chars_per_sec": 26.0,
     },
     "antonio": {
-        "min_words": 10,
+        "min_words": 12,
         "max_words": 100,
-        "gap_sec": 2.0,
+        "gap_sec": 1.5,
         "max_duration": None,
         "chars_per_sec": 24.0,
     },
@@ -1486,7 +1486,13 @@ VOICE_CALIBRATION: dict[str, float] = {
     "default": 15.1,  # Previous XTTS v2 baseline
 }
 
+MIN_ATEMPO = 0.5  # Lower `atempo` ratio for stretch when TTS underfills a slot
 MAX_ATEMPO = 1.6  # Upper `atempo` ratio supported in timing-adjustment pipelines
+
+
+def _clamp_atempo_ratio(ratio: float) -> float:
+    """Clamp ffmpeg atempo ratio to the project quality bounds."""
+    return max(MIN_ATEMPO, min(ratio, MAX_ATEMPO))
 
 
 def _estimate_synth_duration(text: str, cps: float = 15.1) -> float:
@@ -1770,8 +1776,7 @@ def synthesize_segments_kokoro(
             )
             synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
 
-            ratio = synth_dur / orig_dur
-            ratio = max(0.8, min(ratio, 1.6))
+            ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
 
             subprocess.run(
                 [
@@ -1941,7 +1946,7 @@ def synthesize_segments_google_tts(
                     text=True,
                 )
                 synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-                ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
+                ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
                 subprocess.run(
                     [
                         "ffmpeg",
@@ -2069,11 +2074,15 @@ def synthesize_segments_edge_tts(
     async def _stream_mp3(text: str) -> bytes:
         communicate = edge_tts.Communicate(text, voice, rate=rate_str)
         buf = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk.get("type") == "audio":
-                data = chunk.get("data")
-                if data:
-                    buf.write(data)
+        try:
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio":
+                    data = chunk.get("data")
+                    if data:
+                        buf.write(data)
+        except ConnectionResetError:
+            # Edge TTS sometimes closes the socket once streaming finishes.
+            pass
         return buf.getvalue()
 
     def _run_edge_tts_stream(text: str) -> bytes:
@@ -2146,7 +2155,7 @@ def synthesize_segments_edge_tts(
                 capture_output=True, text=True,
             )
             synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-            ratio = max(0.8, min(synth_dur / orig_dur, 1.6))
+            ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
             subprocess.run(
                 [
                     "ffmpeg", "-y",
@@ -2296,9 +2305,9 @@ def synthesize_segments(
 
             ratio = synth_dur / orig_dur  # >1 = too long, need to speed up
 
-            # Cap: never compress beyond 1.6× (intelligibility limit)
-            # Never stretch beyond 0.8× (sounds unnaturally slow)
-            ratio = max(0.8, min(ratio, 1.6))
+            # Cap: never compress beyond MAX_ATEMPO; allow deeper stretch down
+            # to MIN_ATEMPO so short utterances can still fill their time slots.
+            ratio = _clamp_atempo_ratio(ratio)
 
             atempo = f"atempo={ratio:.4f}"
             subprocess.run(
