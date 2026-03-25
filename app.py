@@ -1251,6 +1251,7 @@ def _merge_segments(
 
     merged: list = []
     buf: list = []          # segments being accumulated into current utterance
+    buf_children: list[int] = []  # original segment indices for re-expansion
 
     def _flush() -> None:
         if not buf:
@@ -1259,10 +1260,12 @@ def _merge_segments(
             "start": buf[0]["start"],
             "end":   buf[-1]["end"],
             "text":  " ".join(s["text"].strip() for s in buf),
+            "children": buf_children.copy(),
         })
         buf.clear()
+        buf_children.clear()
 
-    for seg in segments:
+    for seg_idx, seg in enumerate(segments):
         # ── Priority 1: gap flush ──────────────────────────────────────────
         # Check BEFORE appending so the gap boundary falls between utterances.
         if gap_sec is not None and buf:
@@ -1271,6 +1274,7 @@ def _merge_segments(
                 _flush()
 
         buf.append(seg)
+        buf_children.append(seg_idx)
 
         # Running stats on the current buffer
         combined_text  = " ".join(s["text"].strip() for s in buf)

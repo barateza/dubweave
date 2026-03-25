@@ -198,6 +198,16 @@ class TestMergeSegments:
         result = _merge_segments(segs)
         assert all("text" in s for s in result)
 
+    def test_merged_segments_include_children_indices(self):
+        segs = [
+            {"start": 0.0, "end": 0.5, "text": "Hello"},
+            {"start": 0.5, "end": 1.0, "text": "world."},
+        ]
+        result = _merge_segments(segs)
+        assert all("children" in s for s in result)
+        assert all(isinstance(s["children"], list) for s in result)
+        assert result[0]["children"][0] == 0
+
 
 # ===========================================================================
 # validate_youtube_url
