@@ -2058,13 +2058,33 @@ def synthesize_segments_edge_tts(
     results: list[dict | None] = [None] * len(segments)
     errors: list[str] = []
 
+    # Edge TTS sometimes force-closes the socket after streaming. Swallow
+    # the resulting ConnectionResetError so asyncio does not spam the log.
+    def _edge_tts_asyncio_exception_handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError):
+            return
+        loop.default_exception_handler(context)
+
     async def _stream_mp3(text: str) -> bytes:
         communicate = edge_tts.Communicate(text, voice, rate=rate_str)
         buf = io.BytesIO()
         async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                buf.write(chunk["data"])
+            if chunk.get("type") == "audio":
+                data = chunk.get("data")
+                if data:
+                    buf.write(data)
         return buf.getvalue()
+
+    def _run_edge_tts_stream(text: str) -> bytes:
+        loop = asyncio.new_event_loop()
+        loop.set_exception_handler(_edge_tts_asyncio_exception_handler)
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_stream_mp3(text))
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
 
     def _synthesize_one(idx: int, seg: dict) -> dict:
         out_raw = seg_dir / f"seg_{idx:04d}_raw.wav"
@@ -2075,7 +2095,7 @@ def synthesize_segments_edge_tts(
         # Synthesize: stream MP3 from Edge TTS, then decode to WAV via ffmpeg.
         # ffmpeg is already a pipeline dependency — no new tools needed.
         try:
-            mp3_bytes = asyncio.run(_stream_mp3(text))
+            mp3_bytes = _run_edge_tts_stream(text)
             if not mp3_bytes:
                 raise RuntimeError("Edge TTS returned empty audio")
 
