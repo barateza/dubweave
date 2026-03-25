@@ -74,6 +74,20 @@ NLLB_TGT_LANG = os.getenv("NLLB_TGT_LANG", "por_Latn")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
 
+
+def _int_env(name: str, default: int) -> int:
+    val = os.getenv(name, "").strip()
+    if not val:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+
+OPENROUTER_CHUNK_SIZE = max(1, _int_env("OPENROUTER_CHUNK_SIZE", 120))
+OPENROUTER_CONTEXT_SIZE = max(0, _int_env("OPENROUTER_CONTEXT_SIZE", 8))
+
 # Google Cloud TTS config (from .env)
 GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY", "").strip()
 GOOGLE_TTS_LANGUAGE_CODE = os.getenv("GOOGLE_TTS_LANGUAGE_CODE", "pt-BR")
@@ -1104,28 +1118,28 @@ def _translate_openrouter(
     texts: list[str], api_key: str, logs: list
 ) -> tuple[list[str], list]:
     """
-    Translate via OpenRouter in chunks of 60 utterances with a 3-utterance
+    Translate via OpenRouter in configurable chunks with a configurable
     context window prepended to each chunk.
 
     Context window rationale: without preceding context, the model translates
     each chunk as if it starts a new document. Pronouns, topics, and register
-    established earlier are invisible. Prepending the last 3 utterances of the
+    established earlier are invisible. Prepending the last few utterances of the
     previous chunk as [CONTEXT] (not to be translated) gives the model enough
     coherence to resolve anaphora and maintain register across boundaries.
     """
     logs = log(f"🌐 Translating via OpenRouter ({OPENROUTER_MODEL})…", logs)
 
-    CHUNK = 60  # smaller than 80 to leave room for context tokens
-    CONTEXT = 3  # preceding utterances to include as read-only context
+    chunk_size = OPENROUTER_CHUNK_SIZE
+    context_size = OPENROUTER_CONTEXT_SIZE
     all_translated = []
-    total_chunks = (len(texts) + CHUNK - 1) // CHUNK
+    total_chunks = (len(texts) + chunk_size - 1) // chunk_size
 
     for chunk_i in range(total_chunks):
-        chunk = texts[chunk_i * CHUNK : (chunk_i + 1) * CHUNK]
-        ctx = all_translated[-CONTEXT:] if all_translated else []
+        chunk = texts[chunk_i * chunk_size : (chunk_i + 1) * chunk_size]
+        ctx = all_translated[-context_size:] if all_translated else []
 
         logs = log(
-            f"   Chunk {chunk_i+1}/{total_chunks} ({len(chunk)} utterances, {len(ctx)} context)…",
+            f"   Chunk {chunk_i+1}/{total_chunks} (size={len(chunk)}, context={len(ctx)})…",
             logs,
         )
 

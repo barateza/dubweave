@@ -81,6 +81,8 @@ Dubweave reads configuration from a `.env` file in the project root. A default `
 | `GRADIO_SERVER_PORT` | `7860` | Web UI port. Change to `8000`, `8080`, etc. to avoid conflicts |
 | `GRADIO_SERVER_NAME` | `0.0.0.0` | Server host. `0.0.0.0` = network accessible, `127.0.0.1` = localhost only |
 | `GRADIO_SHARE` | `false` | Enable public Gradio.live tunnel. Set to `true` for temporary sharing. |
+| `OPENROUTER_CHUNK_SIZE` | `120` | Number of numbered utterances sent per OpenRouter call (keeps you far below the 1,048,576-token input window). |
+| `OPENROUTER_CONTEXT_SIZE` | `8` | How many previously translated utterances to include as read-only context so pronouns/register stay coherent across chunk boundaries. |
 
 ### Setting up OpenRouter (Optional)
 
