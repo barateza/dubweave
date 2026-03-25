@@ -238,8 +238,8 @@ These settings preserve high `boundary` and `sweet` scores while raising `fit` s
 
 - All three primary Edge-TTS voices are now calibrated:
 
-    - `pt-BR-FranciscaNeural` and `pt-BR-AntonioNeural`: `chars_per_sec = 24.0` (shared optimal merge parameters)
-    - `pt-BR-ThalitaNeural`: `chars_per_sec = 26.0` (faster proxy)
+  - `pt-BR-FranciscaNeural` and `pt-BR-AntonioNeural`: `chars_per_sec = 24.0` (shared optimal merge parameters)
+  - `pt-BR-ThalitaNeural`: `chars_per_sec = 26.0` (faster proxy)
 
 Further gains will require a different segmentation strategy or voice-specific routing for niche voices.
 
