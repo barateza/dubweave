@@ -198,6 +198,51 @@ Four loops have been completed:
 | Loop | What it optimizes | Result |
 | --- | --- | --- |
 | **Loop 1** | Segment merge parameters (`min_words`, `max_words`, `gap_sec`) | Composite score: 0.505 → 0.813 (+61%) |
+
+### Autoresearch Loop 1 v2 — Edge-TTS (final)
+
+- **Goal:** Tune merge parameters so Edge-TTS (Francisca/Antonio) at production speaking rate fits Kokoro slots without degrading quality.
+- **Final proxy locked:** `chars_per_sec = 24.0` (empirical sweep showed strong fit growth across 18→25 cps; 24.0 chosen for fit-to-quality balance).
+- **Experiments run:** chars_per_sec sweep (14→25), then structural matrix over `gap_sec` × `max_words` with `chars_per_sec=24.0`.
+- **Best observed S during sweep:** 0.81179 at `chars_per_sec=25.0`, but 24.0 was selected for better boundary/sweet tradeoff.
+- **Final hypothesis test:** `min_words=8, max_words=100, gap_sec=2.0` → DISCARD (no improvement).
+**Conclusion:** Loop 1 v2 closed. The generic `edge` entry was replaced with explicit, voice-specific `MERGE_CONFIGS` entries to avoid ambiguity. The final locked parameters are:
+
+```python
+"francisca": {
+    "min_words": 10,
+    "max_words": 100,
+    "gap_sec": 2.0,
+    "max_duration": None,
+    "chars_per_sec": 24.0,
+},
+
+"antonio": {
+    "min_words": 10,
+    "max_words": 100,
+    "gap_sec": 2.0,
+    "max_duration": None,
+    "chars_per_sec": 24.0,
+},
+
+"thalita": {
+    "min_words": 10,
+    "max_words": 100,
+    "gap_sec": 2.0,
+    "max_duration": None,
+    "chars_per_sec": 26.0,
+},
+```
+
+These settings preserve high `boundary` and `sweet` scores while raising `fit` substantially vs the original 11.1 cps baseline.
+
+- All three primary Edge-TTS voices are now calibrated:
+
+    - `pt-BR-FranciscaNeural` and `pt-BR-AntonioNeural`: `chars_per_sec = 24.0` (shared optimal merge parameters)
+    - `pt-BR-ThalitaNeural`: `chars_per_sec = 26.0` (faster proxy)
+
+Further gains will require a different segmentation strategy or voice-specific routing for niche voices.
+
 | **Loop 2** | Translation system prompt (`translation_prompt.md`) | Translations rated 4+/5: 76.7% → 90.0% |
 | **Loop 3** | PT-BR normalizer rules (`normalizer_rules.json`) | Detection rate: 92% → 100%, false positives: 2.5% → 0% |
 | **Loop 4** | Kokoro speech rate calibration | Timing prediction MAE: 0.9s → 0.321s (−64%) |

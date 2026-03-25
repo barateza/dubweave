@@ -1170,11 +1170,26 @@ MERGE_CONFIGS = {
         "gap_sec": 3.0,
         "max_duration": None,
     },
-    "edge": {
+    "francisca": {
         "min_words": 10,
         "max_words": 100,
         "gap_sec": 2.0,
         "max_duration": None,
+        "chars_per_sec": 24.0,
+    },
+    "thalita": {
+        "min_words": 10,
+        "max_words": 100,
+        "gap_sec": 2.0,
+        "max_duration": None,
+        "chars_per_sec": 26.0,
+    },
+    "antonio": {
+        "min_words": 10,
+        "max_words": 100,
+        "gap_sec": 2.0,
+        "max_duration": None,
+        "chars_per_sec": 24.0,
     },
     "default": {
         "min_words": 8,
@@ -1187,10 +1202,14 @@ MERGE_CONFIGS = {
 
 def _get_merge_config(engine: str) -> dict:
     """Return the optimized merge parameters for a given TTS engine."""
-    if engine.startswith("Kokoro"):
+    if "Francisca" in engine:
+        return MERGE_CONFIGS["francisca"]
+    if "Antonio" in engine:
+        return MERGE_CONFIGS["antonio"]
+    if "Thalita" in engine:
+        return MERGE_CONFIGS["thalita"]
+    if "Kokoro" in engine:
         return MERGE_CONFIGS["kokoro"]
-    if engine.startswith("Edge"):
-        return MERGE_CONFIGS["edge"]
     return MERGE_CONFIGS["default"]
 
 

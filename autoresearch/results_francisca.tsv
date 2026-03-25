@@ -1,0 +1,13 @@
+timestamp	status	S	fit	boundary	sweet	over	n_segs	min_words	max_words	max_duration	chars_per_sec	gap_sec	voice	description
+2026-03-25T15:14:03	BASELINE	0.76634	0.8714	0.998	0.7062	0.0826	1998	10	100		21.0	2.0	pt-BR-FranciscaNeural	Edge-TTS reset
+2026-03-25T15:14:14	KEEP	0.78756	0.9244	0.998	0.7062	0.0826	1998	10	100		22.0	2.0	pt-BR-FranciscaNeural	chars_per_sec=22.0: sweep up
+2026-03-25T15:14:27	KEEP	0.80078	0.9575	0.998	0.7062	0.0826	1998	10	100		23.0	2.0	pt-BR-FranciscaNeural	chars_per_sec=23.0: sweep up
+2026-03-25T15:14:38	KEEP	0.80658	0.972	0.998	0.7062	0.0826	1998	10	100		24.0	2.0	pt-BR-FranciscaNeural	chars_per_sec=24.0: sweep up
+2026-03-25T15:14:52	KEEP	0.81179	0.985	0.998	0.7062	0.0826	1998	10	100		25.0	2.0	pt-BR-FranciscaNeural	chars_per_sec=25.0: sweep up
+2026-03-25T15:20:34	DISCARD	0.8066	0.9715	0.998	0.7071	0.083	2001	10	100		24.0	1.5	pt-BR-FranciscaNeural	gap_sec=1.5 max_words=100: phase1
+2026-03-25T15:20:56	DISCARD	0.80635	0.9715	0.9975	0.7066	0.083	2001	10	80		24.0	1.5	pt-BR-FranciscaNeural	gap_sec=1.5 max_words=80: phase1
+2026-03-25T15:21:06	DISCARD	0.80513	0.9716	0.9935	0.7057	0.0832	2008	10	60		24.0	1.5	pt-BR-FranciscaNeural	gap_sec=1.5 max_words=60: phase1
+2026-03-25T15:21:18	DISCARD	0.80175	0.9719	0.9802	0.7052	0.0835	2025	10	45		24.0	1.5	pt-BR-FranciscaNeural	gap_sec=1.5 max_words=45: phase1
+2026-03-25T15:21:30	DISCARD	0.79959	0.9715	0.9734	0.7026	0.0802	2071	10	45		24.0	1.0	pt-BR-FranciscaNeural	gap_sec=1.0 max_words=100: phase2
+2026-03-25T15:22:05	DISCARD	0.80349	0.9712	0.9883	0.7036	0.0796	2048	10	80		24.0	1.0	pt-BR-FranciscaNeural	gap_sec=1.0 max_words=80: phase2
+2026-03-25T15:35:21	DISCARD	0.80641	0.9618	0.9982	0.7156	0.0677	2201	8	100		24.0	2.0	pt-BR-FranciscaNeural	min_words=8 max_words=100 gap_sec=2.0: final hypothesis
