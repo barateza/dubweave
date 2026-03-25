@@ -1486,6 +1486,8 @@ VOICE_CALIBRATION: dict[str, float] = {
     "default": 15.1,  # Previous XTTS v2 baseline
 }
 
+MAX_ATEMPO = 1.6  # Upper `atempo` ratio supported in timing-adjustment pipelines
+
 
 def _estimate_synth_duration(text: str, cps: float = 15.1) -> float:
     """Estimate synthesis duration from character count and capacity."""
