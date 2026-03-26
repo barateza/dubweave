@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import time
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -31,6 +32,28 @@ warnings.filterwarnings("ignore", message=".*weight_norm.*", category=FutureWarn
 warnings.filterwarnings("ignore", message=".*dropout option.*", category=UserWarning)
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 load_dotenv()  # Load environment variables from .env file
+
+
+def _configure_asyncio_windows_log_filter() -> None:
+    """Suppress noisy, benign Proactor disconnect tracebacks on Windows."""
+    if sys.platform != "win32":
+        return
+
+    class _AsyncioProactorDisconnectFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            if "_ProactorBasePipeTransport._call_connection_lost" not in msg:
+                return True
+
+            if record.exc_info:
+                exc = record.exc_info[1]
+                if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+                    return False
+
+            return True
+
+    asyncio_logger = logging.getLogger("asyncio")
+    asyncio_logger.addFilter(_AsyncioProactorDisconnectFilter())
 
 
 # ── Lazy imports (installed at runtime) ──────────────────────────────────────
@@ -3754,6 +3777,7 @@ def build_ui():
 
 
 if __name__ == "__main__":
+    _configure_asyncio_windows_log_filter()
     log_startup_info()
     demo = build_ui()
     demo.queue(max_size=3)
