@@ -6,7 +6,7 @@
       "source": "local",
       "contentHash": "706129400c8c91a9264582940b36007116faffcaf27bb0780bdab87337b4f881",
       "installedAt": "2026-03-07T02:15:05.495Z",
-      "updatedAt": "2026-03-07T02:15:05.495Z",
+      "updatedAt": "2026-03-26T04:18:47.105Z",
       "agents": [
         "antigravity"
       ],
@@ -18,7 +18,7 @@
       "source": "local",
       "contentHash": "2abba650ba22a819e67f8c2fb09d0f5f33a24d66d945ee2ef824751bc97151ce",
       "installedAt": "2026-03-07T02:15:05.500Z",
-      "updatedAt": "2026-03-07T02:15:05.500Z",
+      "updatedAt": "2026-03-26T04:18:47.108Z",
       "agents": [
         "antigravity"
       ],
@@ -30,7 +30,7 @@
       "source": "local",
       "contentHash": "23ac05b7f2d8df8311129d41432eba248bdcf14e9ace3f17c581976f7d888ada",
       "installedAt": "2026-03-07T02:15:05.505Z",
-      "updatedAt": "2026-03-07T02:15:05.505Z",
+      "updatedAt": "2026-03-26T04:18:47.114Z",
       "agents": [
         "antigravity"
       ],
@@ -42,7 +42,7 @@
       "source": "local",
       "contentHash": "28a414c715d3c41aae28a25e2f109813ec3f246f76b5567c1e7d6a128cd289ff",
       "installedAt": "2026-03-07T02:15:05.509Z",
-      "updatedAt": "2026-03-07T02:15:05.509Z",
+      "updatedAt": "2026-03-26T04:18:47.117Z",
       "agents": [
         "antigravity"
       ],
@@ -54,7 +54,7 @@
       "source": "local",
       "contentHash": "c49827c59d2e27d313731dfd36314cfde0e8dbf15be0e8f813d2f8b751546b0c",
       "installedAt": "2026-03-07T02:15:05.513Z",
-      "updatedAt": "2026-03-07T02:15:05.513Z",
+      "updatedAt": "2026-03-26T04:18:47.122Z",
       "agents": [
         "antigravity"
       ],
@@ -66,7 +66,7 @@
       "source": "local",
       "contentHash": "6fec09f7e43bb297ad6097e13469e85aa5b5d671a839b4f7e7871ef8eaa76c4e",
       "installedAt": "2026-03-07T02:15:05.531Z",
-      "updatedAt": "2026-03-07T02:15:05.531Z",
+      "updatedAt": "2026-03-26T04:18:47.138Z",
       "agents": [
         "antigravity"
       ],
@@ -78,7 +78,7 @@
       "source": "local",
       "contentHash": "b761f983e21e00173ac42760f478095a3e8c733862c20d9f711d10d962f407cc",
       "installedAt": "2026-03-07T02:15:05.539Z",
-      "updatedAt": "2026-03-07T02:15:05.539Z",
+      "updatedAt": "2026-03-26T04:18:47.147Z",
       "agents": [
         "antigravity"
       ],
@@ -90,7 +90,31 @@
       "source": "local",
       "contentHash": "79d0e1b750dfc70820ac0152d9ca78927c398f669397e9cdb8bb812ceca2fbc6",
       "installedAt": "2026-03-07T02:15:05.553Z",
-      "updatedAt": "2026-03-07T02:15:05.553Z",
+      "updatedAt": "2026-03-26T04:18:47.202Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "component-common-domain-detection": {
+      "name": "component-common-domain-detection",
+      "source": "local",
+      "contentHash": "58c72d63eaf387cf11ae36b223ff80478ba861f53265e42a3c4fbcb3bc739208",
+      "installedAt": "2026-03-26T04:19:58.694Z",
+      "updatedAt": "2026-03-26T04:19:58.694Z",
+      "agents": [
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "technical-design-doc-creator": {
+      "name": "technical-design-doc-creator",
+      "source": "local",
+      "contentHash": "d05974df076f695f96b4e4c263ad19f2aaffe8ee6248c1b07a634dd9ed0ea51e",
+      "installedAt": "2026-03-26T04:19:58.708Z",
+      "updatedAt": "2026-03-26T04:19:58.708Z",
       "agents": [
         "antigravity"
       ],
