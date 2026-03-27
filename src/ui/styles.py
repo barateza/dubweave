@@ -217,6 +217,21 @@ video { border-radius: 12px !important; }
 
 .gr-accordion { background: var(--surface) !important; border-color: var(--border) !important; border-radius: 12px !important; }
 
+.cost-info {
+    background: rgba(124, 109, 255, 0.05);
+    border: 1px solid rgba(124, 109, 255, 0.2);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-top: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.6;
+}
+.cost-info strong { color: var(--accent2); font-weight: 500; }
+.cost-info div { margin-top: 4px; }
+.cost-info .service { color: var(--accent); }
+
 @media (forced-colors: active) {
     #header h1 {
         -webkit-text-fill-color: revert;

@@ -2,7 +2,7 @@ import os
 import shutil
 import platform
 from pathlib import Path
-from src.config import __version__, WHISPER_MODEL, GOOGLE_TTS_API_KEY, ROOT_DIR
+from src.config import __version__, WHISPER_MODEL, GOOGLE_TTS_API_KEY, OPENROUTER_API_KEY, ROOT_DIR
 from src.utils.security import redact
 
 def validate_environment() -> list[str]:
@@ -87,9 +87,8 @@ def log_startup_info() -> None:
     if GOOGLE_TTS_API_KEY:
         tts_engines += ", Google Cloud TTS"
     print(f"[startup] TTS engines available: {tts_engines}")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if openrouter_key:
-        print(f"[startup] OpenRouter: configured ({redact(openrouter_key)})")
+    if OPENROUTER_API_KEY:
+        print(f"[startup] OpenRouter: configured ({redact(OPENROUTER_API_KEY)})")
     else:
         print("[startup] OpenRouter: not configured (local NLLB-200 only)")
 

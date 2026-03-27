@@ -8,7 +8,7 @@ import gradio as gr
 from src.config import (
     WORK_DIR, WHISPER_MODEL, KOKORO_VOICE, GOOGLE_TTS_API_KEY, 
     GOOGLE_TTS_LANGUAGE_CODE, GOOGLE_TTS_VOICE_TYPE, GOOGLE_TTS_VOICE_NAME,
-    EDGE_TTS_VOICE_NAME
+    EDGE_TTS_VOICE_NAME, OPENROUTER_API_KEY
 )
 from src.utils.helpers import log
 from src.utils.security import validate_openrouter_key, validate_google_tts_key
@@ -56,7 +56,7 @@ def run_pipeline(
     progress=gr.Progress(),
 ):
     logs = []
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_key = OPENROUTER_API_KEY
     proj = project_name.strip() or "default"
     
     stage_order = {s: i for i, s in enumerate(STAGES)}

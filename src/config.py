@@ -32,6 +32,7 @@ NLLB_SRC_LANG = os.getenv("NLLB_SRC_LANG", "eng_Latn")
 NLLB_TGT_LANG = os.getenv("NLLB_TGT_LANG", "por_Latn")
 
 # ── OpenRouter config ────────────────────────────────────────────────────────
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
 

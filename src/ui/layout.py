@@ -2,12 +2,43 @@ import os
 import gradio as gr
 from src.config import (
     GOOGLE_TTS_API_KEY, GOOGLE_TTS_VOICE_TYPE, GOOGLE_TTS_VOICE_NAME,
-    EDGE_TTS_VOICE_NAME, EDGE_TTS_PT_BR_VOICES, KOKORO_VOICE, GOOGLE_TTS_VOICE_CATALOG
+    EDGE_TTS_VOICE_NAME, EDGE_TTS_PT_BR_VOICES, KOKORO_VOICE, GOOGLE_TTS_VOICE_CATALOG,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL
 )
 from src.utils.system import validate_environment
 from src.utils.project import project_status, generate_srt_for_project
 from src.pipeline import run_pipeline
 from src.ui.styles import CSS
+
+def update_cost_info(engine, google_type):
+    parts = []
+    
+    # OpenRouter (Translation)
+    if OPENROUTER_API_KEY:
+        model_name = OPENROUTER_MODEL.split("/")[-1]
+        # Unit prices for Gemini 2.0 Flash on OpenRouter
+        cost = "<strong>$0.10</strong>/1M in · <strong>$0.40</strong>/1M out"
+        if "flash-lite" in OPENROUTER_MODEL.lower():
+            cost = "<strong>$0.075</strong>/1M in · <strong>$0.30</strong>/1M out"
+        parts.append(f"<div><span class='service'>🌐 Translation ({model_name})</span>: {cost} (tokens)</div>")
+
+    # Google TTS (Synthesis)
+    if engine == "Google Cloud TTS":
+        costs = {
+            "Standard": "$4.00",
+            "WaveNet": "$16.00",
+            "Neural2": "$16.00",
+            "Studio": "$160.00",
+            "Chirp3 HD": "$30.00",
+            "Polyglot (Preview)": "$16.00"
+        }
+        rate = costs.get(google_type, "$16.00")
+        parts.append(f"<div><span class='service'>🔊 Synthesis ({google_type})</span>: <strong>{rate}</strong>/1M characters</div>")
+    
+    if not parts:
+        return ""
+    
+    return f"<div class='cost-info'>{''.join(parts)}</div>"
 
 def build_ui():
     env_warnings = validate_environment()
@@ -76,9 +107,17 @@ def build_ui():
                 google_voice_type_input = gr.Dropdown(choices=list(GOOGLE_TTS_VOICE_CATALOG.keys()), value=GOOGLE_TTS_VOICE_TYPE, label="Google TTS Type", scale=1)
                 google_voice_input = gr.Dropdown(choices=GOOGLE_TTS_VOICE_CATALOG.get(GOOGLE_TTS_VOICE_TYPE, [GOOGLE_TTS_VOICE_NAME]), value=GOOGLE_TTS_VOICE_NAME, label="Google TTS Voice", scale=2)
 
-            def on_tts_change(engine):
-                return gr.update(visible=engine.startswith("Kokoro")), gr.update(visible=engine.startswith("Edge")), gr.update(visible=engine.startswith("Google"))
-            tts_engine_input.change(fn=on_tts_change, inputs=tts_engine_input, outputs=[kokoro_voice_input, edge_voice_input, google_tts_row])
+            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE))
+
+            def on_tts_change(engine, g_type):
+                v_kokoro = gr.update(visible=engine.startswith("Kokoro"))
+                v_edge = gr.update(visible=engine.startswith("Edge"))
+                v_google = gr.update(visible=engine.startswith("Google"))
+                cost = update_cost_info(engine, g_type)
+                return v_kokoro, v_edge, v_google, cost
+            
+            tts_engine_input.change(fn=on_tts_change, inputs=[tts_engine_input, google_voice_type_input], outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, cost_info_html])
+            google_voice_type_input.change(fn=lambda e, t: update_cost_info(e, t), inputs=[tts_engine_input, google_voice_type_input], outputs=cost_info_html)
 
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
         log_output = gr.Textbox(label="Pipeline log", lines=10, interactive=False, elem_id="log-box")
