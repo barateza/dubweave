@@ -7,38 +7,55 @@ from src.config import (
 )
 from src.utils.system import validate_environment
 from src.utils.project import project_status, generate_srt_for_project
+from src.core.ingest import get_video_metadata
 from src.pipeline import run_pipeline
 from src.ui.styles import CSS
 
-def update_cost_info(engine, google_type):
+def update_cost_info(engine, google_type, meta):
     parts = []
+    dur = meta.get("duration", 0.0)
     
+    # Heuristics: 150 words/min, ~5 chars/word, ~4 chars/token
+    # 150 wpm = 750 chars/min = 200 tokens/min (approx)
+    min_multiplier = dur / 60.0
+    est_chars = min_multiplier * 750
+    est_tokens = min_multiplier * 200
+
     # OpenRouter (Translation)
     if OPENROUTER_API_KEY:
         model_name = OPENROUTER_MODEL.split("/")[-1]
-        # Unit prices for Gemini 2.0 Flash on OpenRouter
-        cost = "<strong>$0.10</strong>/1M in · <strong>$0.40</strong>/1M out"
+        in_p, out_p = 0.10, 0.40
         if "flash-lite" in OPENROUTER_MODEL.lower():
-            cost = "<strong>$0.075</strong>/1M in · <strong>$0.30</strong>/1M out"
-        parts.append(f"<div><span class='service'>🌐 Translation ({model_name})</span>: {cost} (tokens)</div>")
+            in_p, out_p = 0.075, 0.30
+        
+        # Total cost for translation (approx)
+        total_trans = (est_tokens * (in_p + out_p)) / 1_000_000
+        parts.append(f"<div><span class='service'>🌐 Translation ({model_name})</span>: ~<strong>${total_trans:.4f}</strong> total est.</div>")
 
     # Google TTS (Synthesis)
     if engine == "Google Cloud TTS":
         costs = {
-            "Standard": "$4.00",
-            "WaveNet": "$16.00",
-            "Neural2": "$16.00",
-            "Studio": "$160.00",
-            "Chirp3 HD": "$30.00",
-            "Polyglot (Preview)": "$16.00"
+            "Standard": 4.00,
+            "WaveNet": 16.00,
+            "Neural2": 16.00,
+            "Studio": 160.00,
+            "Chirp3 HD": 30.00,
+            "Polyglot (Preview)": 16.00
         }
-        rate = costs.get(google_type, "$16.00")
-        parts.append(f"<div><span class='service'>🔊 Synthesis ({google_type})</span>: <strong>{rate}</strong>/1M characters</div>")
+        rate = costs.get(google_type, 16.00)
+        total_tts = (est_chars * rate) / 1_000_000
+        parts.append(f"<div><span class='service'>🔊 Synthesis ({google_type})</span>: ~<strong>${total_tts:.4f}</strong> total est.</div>")
     
     if not parts:
         return ""
     
-    return f"<div class='cost-info'>{''.join(parts)}</div>"
+    header = f"<div style='margin-bottom:8px;font-size:0.7rem;opacity:0.8;'>Estimating for <strong>{dur:.1f}s</strong> ({meta.get('title', 'Unknown')[:30]}...)</div>" if dur > 0 else ""
+    return f"<div class='cost-info'>{header}{''.join(parts)}</div>"
+
+def on_input_change(url, upload, engine, g_type):
+    meta = get_video_metadata(url, upload)
+    cost = update_cost_info(engine, g_type, meta)
+    return meta, cost
 
 def build_ui():
     env_warnings = validate_environment()
@@ -72,6 +89,8 @@ def build_ui():
                     project_name_input = gr.Textbox(placeholder="my-video", label="Project name", lines=1, scale=2)
                     resume_from_input = gr.Dropdown(choices=["download", "transcribe", "translate", "synthesize", "assemble"], value="download", label="Resume from stage", scale=1)
                 project_status_html = gr.HTML("<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#9494b2;margin-top:6px;'>Enter a project name to see its status.</div>")
+
+        video_meta_state = gr.State({"title": "Unknown", "duration": 0.0})
 
         def refresh_status(name):
             if not name.strip(): return "<div style='font-size:0.75rem;font-family:JetBrains Mono,monospace;color:#9494b2;'>Enter a project name to see its status.</div>"
@@ -107,17 +126,20 @@ def build_ui():
                 google_voice_type_input = gr.Dropdown(choices=list(GOOGLE_TTS_VOICE_CATALOG.keys()), value=GOOGLE_TTS_VOICE_TYPE, label="Google TTS Type", scale=1)
                 google_voice_input = gr.Dropdown(choices=GOOGLE_TTS_VOICE_CATALOG.get(GOOGLE_TTS_VOICE_TYPE, [GOOGLE_TTS_VOICE_NAME]), value=GOOGLE_TTS_VOICE_NAME, label="Google TTS Voice", scale=2)
 
-            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE))
+            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE, {"duration": 0}))
 
-            def on_tts_change(engine, g_type):
+            def on_tts_change(engine, g_type, meta):
                 v_kokoro = gr.update(visible=engine.startswith("Kokoro"))
                 v_edge = gr.update(visible=engine.startswith("Edge"))
                 v_google = gr.update(visible=engine.startswith("Google"))
-                cost = update_cost_info(engine, g_type)
+                cost = update_cost_info(engine, g_type, meta)
                 return v_kokoro, v_edge, v_google, cost
             
-            tts_engine_input.change(fn=on_tts_change, inputs=[tts_engine_input, google_voice_type_input], outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, cost_info_html])
-            google_voice_type_input.change(fn=lambda e, t: update_cost_info(e, t), inputs=[tts_engine_input, google_voice_type_input], outputs=cost_info_html)
+            tts_engine_input.change(fn=on_tts_change, inputs=[tts_engine_input, google_voice_type_input, video_meta_state], outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, cost_info_html])
+            google_voice_type_input.change(fn=lambda e, t, m: update_cost_info(e, t, m), inputs=[tts_engine_input, google_voice_type_input, video_meta_state], outputs=cost_info_html)
+
+            url_input.change(fn=on_input_change, inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input], outputs=[video_meta_state, cost_info_html])
+            video_upload_input.change(fn=on_input_change, inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input], outputs=[video_meta_state, cost_info_html])
 
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
         log_output = gr.Textbox(label="Pipeline log", lines=10, interactive=False, elem_id="log-box")

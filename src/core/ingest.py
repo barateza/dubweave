@@ -16,6 +16,32 @@ _YT_URL_PATTERN = re.compile(
 
 _VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".ts", ".m4v"}
 
+def get_video_metadata(url: str, upload_path: str | None) -> dict:
+    """Quickly fetch duration and title without full download/ingest."""
+    meta = {"title": "Unknown", "duration": 0.0}
+    
+    if upload_path and Path(upload_path).is_file():
+        src = Path(upload_path)
+        meta["title"] = src.stem
+        try:
+            probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(src)], capture_output=True, text=True)
+            if probe.returncode == 0:
+                meta["duration"] = float(json.loads(probe.stdout)["format"]["duration"])
+        except Exception: pass
+        return meta
+
+    if url and url.strip():
+        import yt_dlp as yt
+        try:
+            with yt.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                meta["title"] = info.get("title", "YouTube Video")
+                meta["duration"] = float(info.get("duration", 0.0))
+        except Exception: pass
+        return meta
+
+    return meta
+
 def validate_video_source(url: str, upload_path: str | None) -> tuple[bool, str]:
     has_file = bool(upload_path and upload_path.strip() and Path(upload_path.strip()).is_file())
     has_url = bool(url and url.strip())
