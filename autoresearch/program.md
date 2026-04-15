@@ -49,13 +49,17 @@ The goal is to find the shortest `max_words` that still keeps polite transitions
 ## Running experiments
 
 1. Edit `merge_config.json` to one of the target parameter sets (max_words/gap combinations listed above). `min_words`, `max_duration`, `chars_per_sec`, and `voice` stay constant.
+
 2. Run the benchmark with a hypothesis-laden description:
 
-```
+```text
 pixi run python benchmark.py -d "gap_sec=1.5 max_words=30: hypothesis lower gap + tighter max_words raises fit for 11.1 cps"
 ```
+
 3. After the run, inspect the console output. The benchmark prints `fit`, `boundary`, `sweet`, `over`, and `S`, and whether the config is `KEEP` or `DISCARD`. Record the results using your own log format (e.g., `EXP #N: gap_sec=1.5 max_words=30 → S=0.xxx (KEEP) — what changed`).
+
 4. If the run is a DISCARD, restore the baseline snippet before making the next edit. If it is a KEEP and the `S` beats the previous best, leave the new values in `merge_config.json` so that future runs start from the improved baseline.
+
 5. You may run `pixi run python benchmark.py --status` at any time to check how many experiments have been logged and where the current best `S` sits. The `--sweep` flag is helpful for previewing `gap_sec` behavior before writing to `results.tsv`.
 
 ## Rules
