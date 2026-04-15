@@ -3,48 +3,48 @@ import gradio as gr
 from src.config import (
     GOOGLE_TTS_API_KEY, GOOGLE_TTS_VOICE_TYPE, GOOGLE_TTS_VOICE_NAME,
     EDGE_TTS_VOICE_NAME, EDGE_TTS_PT_BR_VOICES, KOKORO_VOICE, GOOGLE_TTS_VOICE_CATALOG,
-    OPENROUTER_API_KEY, OPENROUTER_MODEL
+    OPENROUTER_API_KEY, OPENROUTER_MODEL,
+    GEMINI_TTS_API_KEY, GEMINI_TTS_PRICING_MODE, GEMINI_TTS_SINGLE_VOICE,
+    GEMINI_TTS_MULTI_SPEAKER, GEMINI_TTS_SPEAKER_ASSIGNMENT,
+    GEMINI_TTS_SPEAKER1_NAME, GEMINI_TTS_SPEAKER1_VOICE,
+    GEMINI_TTS_SPEAKER2_NAME, GEMINI_TTS_SPEAKER2_VOICE, GEMINI_TTS_VOICES,
 )
 from src.utils.system import validate_environment
 from src.utils.project import project_status, generate_srt_for_project
 from src.core.ingest import get_video_metadata
+from src.core.pricing import (
+    estimate_openrouter_translation_cost,
+    estimate_google_tts_cost,
+    pick_gemini_tts_cost,
+)
 from src.pipeline import run_pipeline
 from src.ui.styles import CSS
 
-def update_cost_info(engine, google_type, meta):
+def update_cost_info(engine, google_type, meta, gemini_mode):
     parts = []
     dur = meta.get("duration", 0.0)
-    
-    # Heuristics: 150 words/min, ~5 chars/word, ~4 chars/token
-    # 150 wpm = 750 chars/min = 200 tokens/min (approx)
-    min_multiplier = dur / 60.0
-    est_chars = min_multiplier * 750
-    est_tokens = min_multiplier * 200
 
     # OpenRouter (Translation)
     if OPENROUTER_API_KEY:
         model_name = OPENROUTER_MODEL.split("/")[-1]
-        in_p, out_p = 0.10, 0.40
-        if "flash-lite" in OPENROUTER_MODEL.lower():
-            in_p, out_p = 0.075, 0.30
-        
-        # Total cost for translation (approx)
-        total_trans = (est_tokens * (in_p + out_p)) / 1_000_000
+        total_trans = estimate_openrouter_translation_cost(dur, OPENROUTER_MODEL)
         parts.append(f"<div><span class='service'>🌐 Translation ({model_name})</span>: ~<strong>${total_trans:.4f}</strong> total est.</div>")
 
     # Google TTS (Synthesis)
     if engine == "Google Cloud TTS":
-        costs = {
-            "Standard": 4.00,
-            "WaveNet": 16.00,
-            "Neural2": 16.00,
-            "Studio": 160.00,
-            "Chirp3 HD": 30.00,
-            "Polyglot (Preview)": 16.00
-        }
-        rate = costs.get(google_type, 16.00)
-        total_tts = (est_chars * rate) / 1_000_000
+        total_tts = estimate_google_tts_cost(dur, google_type)
         parts.append(f"<div><span class='service'>🔊 Synthesis ({google_type})</span>: ~<strong>${total_tts:.4f}</strong> total est.</div>")
+
+    if engine == "Gemini 3.1 Flash TTS Preview":
+        gemini_est = pick_gemini_tts_cost(dur, gemini_mode)
+        parts.append(
+            (
+                "<div><span class='service'>🔊 Synthesis (Gemini 3.1 Flash TTS Preview)</span>: "
+                f"~<strong>${gemini_est.total_cost_usd:.4f}</strong> total est. "
+                f"({gemini_est.audio_tokens:.0f} audio tokens, mode: {gemini_est.mode})"
+                "</div>"
+            )
+        )
     
     if not parts:
         return ""
@@ -52,9 +52,9 @@ def update_cost_info(engine, google_type, meta):
     header = f"<div style='margin-bottom:8px;font-size:0.7rem;opacity:0.8;'>Estimating for <strong>{dur:.1f}s</strong> ({meta.get('title', 'Unknown')[:30]}...)</div>" if dur > 0 else ""
     return f"<div class='cost-info'>{header}{''.join(parts)}</div>"
 
-def on_input_change(url, upload, engine, g_type):
+def on_input_change(url, upload, engine, g_type, gemini_mode):
     meta = get_video_metadata(url, upload)
-    cost = update_cost_info(engine, g_type, meta)
+    cost = update_cost_info(engine, g_type, meta, gemini_mode)
     return meta, cost
 
 def build_ui():
@@ -118,7 +118,13 @@ def build_ui():
             cookies_file_input = gr.File(label="Option B · cookies.txt", file_types=[".txt"], type="filepath")
 
         with gr.Accordion("🔊 TTS Engine", open=True):
-            tts_engine_input = gr.Radio(choices=["Kokoro (fast, PT-BR native)", "Edge TTS (cloud, no key)", "XTTS v2 (voice clone)"] + (["Google Cloud TTS"] if GOOGLE_TTS_API_KEY else []), value="Kokoro (fast, PT-BR native)", label="TTS engine")
+            tts_choices = ["Kokoro (fast, PT-BR native)", "Edge TTS (cloud, no key)", "XTTS v2 (voice clone)"]
+            if GOOGLE_TTS_API_KEY:
+                tts_choices.append("Google Cloud TTS")
+            if GEMINI_TTS_API_KEY:
+                tts_choices.append("Gemini 3.1 Flash TTS Preview")
+
+            tts_engine_input = gr.Radio(choices=tts_choices, value="Kokoro (fast, PT-BR native)", label="TTS engine")
             kokoro_voice_input = gr.Dropdown(choices=["pf_dora", "pm_alex", "pm_santa"], value=KOKORO_VOICE, label="Kokoro voice", visible=True)
             edge_voice_input = gr.Dropdown(choices=EDGE_TTS_PT_BR_VOICES, value=EDGE_TTS_VOICE_NAME, label="Edge TTS voice", visible=False)
             
@@ -126,20 +132,83 @@ def build_ui():
                 google_voice_type_input = gr.Dropdown(choices=list(GOOGLE_TTS_VOICE_CATALOG.keys()), value=GOOGLE_TTS_VOICE_TYPE, label="Google TTS Type", scale=1)
                 google_voice_input = gr.Dropdown(choices=GOOGLE_TTS_VOICE_CATALOG.get(GOOGLE_TTS_VOICE_TYPE, [GOOGLE_TTS_VOICE_NAME]), value=GOOGLE_TTS_VOICE_NAME, label="Google TTS Voice", scale=2)
 
-            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE, {"duration": 0}))
+            with gr.Column(visible=False) as gemini_tts_col:
+                gemini_pricing_mode_input = gr.Dropdown(
+                    choices=["auto", "standard", "batch"],
+                    value=GEMINI_TTS_PRICING_MODE,
+                    label="Gemini pricing mode (estimator)",
+                )
+                gemini_multi_speaker_input = gr.Checkbox(
+                    value=GEMINI_TTS_MULTI_SPEAKER,
+                    label="Multi-speaker (up to 2)",
+                )
+                gemini_single_voice_input = gr.Dropdown(
+                    choices=GEMINI_TTS_VOICES,
+                    value=GEMINI_TTS_SINGLE_VOICE,
+                    label="Gemini single-speaker voice",
+                    visible=not GEMINI_TTS_MULTI_SPEAKER,
+                )
+                with gr.Column(visible=GEMINI_TTS_MULTI_SPEAKER) as gemini_multi_row:
+                    gemini_speaker_assignment_input = gr.Dropdown(
+                        choices=["alternate", "prefix"],
+                        value=GEMINI_TTS_SPEAKER_ASSIGNMENT,
+                        label="Speaker assignment",
+                    )
+                    with gr.Row():
+                        gemini_speaker1_name_input = gr.Textbox(value=GEMINI_TTS_SPEAKER1_NAME, label="Speaker 1 name")
+                        gemini_speaker1_voice_input = gr.Dropdown(choices=GEMINI_TTS_VOICES, value=GEMINI_TTS_SPEAKER1_VOICE, label="Speaker 1 voice")
+                    with gr.Row():
+                        gemini_speaker2_name_input = gr.Textbox(value=GEMINI_TTS_SPEAKER2_NAME, label="Speaker 2 name")
+                        gemini_speaker2_voice_input = gr.Dropdown(choices=GEMINI_TTS_VOICES, value=GEMINI_TTS_SPEAKER2_VOICE, label="Speaker 2 voice")
 
-            def on_tts_change(engine, g_type, meta):
+            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE, {"duration": 0}, GEMINI_TTS_PRICING_MODE))
+
+            def on_tts_change(engine, g_type, meta, gemini_mode, gemini_multi):
                 v_kokoro = gr.update(visible=engine.startswith("Kokoro"))
                 v_edge = gr.update(visible=engine.startswith("Edge"))
                 v_google = gr.update(visible=engine.startswith("Google"))
-                cost = update_cost_info(engine, g_type, meta)
-                return v_kokoro, v_edge, v_google, cost
+                v_gemini = gr.update(visible=engine.startswith("Gemini"))
+                v_gemini_single = gr.update(visible=engine.startswith("Gemini") and not gemini_multi)
+                v_gemini_multi = gr.update(visible=engine.startswith("Gemini") and gemini_multi)
+                cost = update_cost_info(engine, g_type, meta, gemini_mode)
+                return v_kokoro, v_edge, v_google, v_gemini, v_gemini_single, v_gemini_multi, cost
             
-            tts_engine_input.change(fn=on_tts_change, inputs=[tts_engine_input, google_voice_type_input, video_meta_state], outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, cost_info_html])
-            google_voice_type_input.change(fn=lambda e, t, m: update_cost_info(e, t, m), inputs=[tts_engine_input, google_voice_type_input, video_meta_state], outputs=cost_info_html)
+            tts_engine_input.change(
+                fn=on_tts_change,
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, gemini_multi_speaker_input],
+                outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, gemini_tts_col, gemini_single_voice_input, gemini_multi_row, cost_info_html],
+            )
+            google_voice_type_input.change(
+                fn=lambda e, t, m, gm: update_cost_info(e, t, m, gm),
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input],
+                outputs=cost_info_html,
+            )
 
-            url_input.change(fn=on_input_change, inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input], outputs=[video_meta_state, cost_info_html])
-            video_upload_input.change(fn=on_input_change, inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input], outputs=[video_meta_state, cost_info_html])
+            gemini_pricing_mode_input.change(
+                fn=lambda e, t, m, gm: update_cost_info(e, t, m, gm),
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input],
+                outputs=cost_info_html,
+            )
+
+            gemini_multi_speaker_input.change(
+                fn=lambda is_multi, engine: (
+                    gr.update(visible=engine.startswith("Gemini") and not is_multi),
+                    gr.update(visible=engine.startswith("Gemini") and is_multi),
+                ),
+                inputs=[gemini_multi_speaker_input, tts_engine_input],
+                outputs=[gemini_single_voice_input, gemini_multi_row],
+            )
+
+            url_input.change(
+                fn=on_input_change,
+                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input],
+                outputs=[video_meta_state, cost_info_html],
+            )
+            video_upload_input.change(
+                fn=on_input_change,
+                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input],
+                outputs=[video_meta_state, cost_info_html],
+            )
 
         run_btn = gr.Button("▶  DUB THIS VIDEO", elem_id="run-btn")
         log_output = gr.Textbox(label="Pipeline log", lines=10, interactive=False, elem_id="log-box")
@@ -152,6 +221,32 @@ def build_ui():
         
         srt_btn.click(fn=generate_srt_for_project, inputs=project_name_input, outputs=[srt_file_output, srt_status])
 
-        run_btn.click(fn=run_pipeline, inputs=[url_input, video_upload_input, speaker_input, whisper_model_input, browser_input, cookies_file_input, project_name_input, resume_from_input, tts_engine_input, kokoro_voice_input, google_voice_type_input, google_voice_input, edge_voice_input], outputs=[video_output, log_output])
+        run_btn.click(
+            fn=run_pipeline,
+            inputs=[
+                url_input,
+                video_upload_input,
+                speaker_input,
+                whisper_model_input,
+                browser_input,
+                cookies_file_input,
+                project_name_input,
+                resume_from_input,
+                tts_engine_input,
+                kokoro_voice_input,
+                google_voice_type_input,
+                google_voice_input,
+                edge_voice_input,
+                gemini_pricing_mode_input,
+                gemini_single_voice_input,
+                gemini_multi_speaker_input,
+                gemini_speaker_assignment_input,
+                gemini_speaker1_name_input,
+                gemini_speaker1_voice_input,
+                gemini_speaker2_name_input,
+                gemini_speaker2_voice_input,
+            ],
+            outputs=[video_output, log_output],
+        )
 
     return demo

@@ -78,6 +78,11 @@ Dubweave reads configuration from a `.env` file in the project root. A default `
 | `KOKORO_SPEED` | `1.0` | Speech rate multiplier. `1.0` = natural, `>1.0` = faster (to fit tight synthesis slots) |
 | `GOOGLE_TTS_API_KEY` | _(empty)_ | Optional Google Cloud TTS. Enable the API in Google Cloud Console. |
 | `GOOGLE_TTS_VOICE_NAME` | `pt-BR-Neural2-A` | Default Google voice name (overridable in UI if key is set) |
+| `GEMINI_TTS_API_KEY` | _(empty)_ | Optional Gemini 3.1 Flash TTS Preview integration via Gemini Developer API. |
+| `GEMINI_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Gemini TTS model code used for synthesis requests. |
+| `GEMINI_TTS_PRICING_MODE` | `auto` | Estimator mode: `auto` picks cheapest between standard and batch and shows one final price. |
+| `GEMINI_TTS_MULTI_SPEAKER` | `false` | Enables explicit two-speaker synthesis controls in the UI. |
+| `GEMINI_TTS_SPEAKER_ASSIGNMENT` | `alternate` | Multi-speaker assignment strategy (`alternate` or `prefix`). |
 | `GRADIO_SERVER_PORT` | `7860` | Web UI port. Change to `8000`, `8080`, etc. to avoid conflicts |
 | `GRADIO_SERVER_NAME` | `0.0.0.0` | Server host. `0.0.0.0` = network accessible, `127.0.0.1` = localhost only |
 | `GRADIO_SHARE` | `false` | Enable public Gradio.live tunnel. Set to `true` for temporary sharing. |
@@ -129,6 +134,12 @@ Dubweave ships with **Kokoro-82M** as the default TTS engine — 82 million para
 ### Google Cloud TTS (Premium Cloud Option)
 
 If you have a valid **Google Cloud TTS API Key**, Dubweave supports 40+ high-quality Brazilian Portuguese voices across 6 model families: **Chirp 3 HD**, **Neural2**, **WaveNet**, **Studio**, **Standard**, and **Polyglot (Preview)**. This provides the highest possible audio quality and naturalness for content where cloud dependencies are acceptable. Configuration is done via `.env`, but voice types and names can be changed directly in the UI if the key is active.
+
+### Gemini 3.1 Flash TTS Preview
+
+If you provide **GEMINI_TTS_API_KEY**, Dubweave enables **Gemini 3.1 Flash TTS Preview** as an additional synthesis engine with expressive prompt control and optional two-speaker output. The UI includes explicit speaker names, per-speaker voice selection, and assignment strategy (`alternate` by segment or `prefix` parsing using `SpeakerName: text`).
+
+The estimator now supports Gemini token pricing and always shows one final synthesis estimate. In `auto` mode, Dubweave computes both standard and batch estimates and shows the cheaper value. Gemini audio output estimates use 25 audio tokens per second, matching the published pricing conversion.
 
 ### Project Management & Pipeline Resume
 

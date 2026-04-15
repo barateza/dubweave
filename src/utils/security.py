@@ -8,7 +8,7 @@ def init_redact_patterns() -> None:
     """Build redaction list from current API key env vars."""
     global _REDACT_PATTERNS
     _REDACT_PATTERNS = []
-    for env_var in ("OPENROUTER_API_KEY", "GOOGLE_TTS_API_KEY"):
+    for env_var in ("OPENROUTER_API_KEY", "GOOGLE_TTS_API_KEY", "GEMINI_TTS_API_KEY"):
         val = os.getenv(env_var, "").strip()
         if len(val) > 8:
             _REDACT_PATTERNS.append(val)
@@ -55,6 +55,22 @@ def validate_google_tts_key(api_key: str) -> tuple[bool, str]:
         return False, f"Google TTS key invalid: HTTP {e.code}."
     except Exception as e:
         return False, f"Google TTS key validation failed: {e}"
+
+def validate_gemini_tts_key(api_key: str) -> tuple[bool, str]:
+    """Validate a Gemini Developer API key via models.list call."""
+    api_key = api_key.strip()
+    if not api_key:
+        return False, "No Gemini TTS API key provided."
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            if resp.status == 200:
+                return True, "Valid"
+            return False, f"Gemini API returned HTTP {resp.status}."
+    except urllib.error.HTTPError as e:
+        return False, f"Gemini key invalid: HTTP {e.code}."
+    except Exception as e:
+        return False, f"Gemini key validation failed: {e}"
 
 # Auto-init patterns on import
 init_redact_patterns()

@@ -8,10 +8,14 @@ import gradio as gr
 from src.config import (
     WORK_DIR, WHISPER_MODEL, KOKORO_VOICE, GOOGLE_TTS_API_KEY, 
     GOOGLE_TTS_LANGUAGE_CODE, GOOGLE_TTS_VOICE_TYPE, GOOGLE_TTS_VOICE_NAME,
-    EDGE_TTS_VOICE_NAME, OPENROUTER_API_KEY
+    EDGE_TTS_VOICE_NAME, OPENROUTER_API_KEY,
+    GEMINI_TTS_API_KEY, GEMINI_TTS_MODEL, GEMINI_TTS_SINGLE_VOICE,
+    GEMINI_TTS_MULTI_SPEAKER, GEMINI_TTS_SPEAKER_ASSIGNMENT,
+    GEMINI_TTS_SPEAKER1_NAME, GEMINI_TTS_SPEAKER1_VOICE,
+    GEMINI_TTS_SPEAKER2_NAME, GEMINI_TTS_SPEAKER2_VOICE,
 )
 from src.utils.helpers import log
-from src.utils.security import validate_openrouter_key, validate_google_tts_key
+from src.utils.security import validate_openrouter_key, validate_google_tts_key, validate_gemini_tts_key
 from src.utils.system import release_gpu_memory
 from src.utils.project import (
     project_dir, save_project_stage, load_project_stage, 
@@ -28,6 +32,7 @@ from src.core.synthesis import (
     synthesize_segments_google_tts, synthesize_segments_edge_tts,
     synthesize_segments, assemble_dubbed_video
 )
+from src.core.gemini_tts import synthesize_segments_gemini_tts
 
 STAGES = ["download", "transcribe", "translate", "synthesize", "assemble"]
 
@@ -53,6 +58,14 @@ def run_pipeline(
     google_tts_voice_type: str = GOOGLE_TTS_VOICE_TYPE,
     google_tts_voice_name: str = GOOGLE_TTS_VOICE_NAME,
     edge_tts_voice: str = EDGE_TTS_VOICE_NAME,
+    gemini_pricing_mode: str = "auto",
+    gemini_single_voice: str = GEMINI_TTS_SINGLE_VOICE,
+    gemini_multi_speaker: bool = GEMINI_TTS_MULTI_SPEAKER,
+    gemini_speaker_assignment: str = GEMINI_TTS_SPEAKER_ASSIGNMENT,
+    gemini_speaker1_name: str = GEMINI_TTS_SPEAKER1_NAME,
+    gemini_speaker1_voice: str = GEMINI_TTS_SPEAKER1_VOICE,
+    gemini_speaker2_name: str = GEMINI_TTS_SPEAKER2_NAME,
+    gemini_speaker2_voice: str = GEMINI_TTS_SPEAKER2_VOICE,
     progress=gr.Progress(),
 ):
     logs = []
@@ -93,6 +106,14 @@ def run_pipeline(
             if not ok: raise PipelineError("Validation", f"Google TTS key invalid: {msg}")
             log("   ✅ Google TTS key valid", logs); yield None, "\n".join(logs)
 
+        if tts_engine == "Gemini 3.1 Flash TTS Preview":
+            if not GEMINI_TTS_API_KEY:
+                raise PipelineError("Validation", "GEMINI_TTS_API_KEY missing.")
+            logs = log("🔑 Validating Gemini TTS API key…", logs); yield None, "\n".join(logs)
+            ok, msg = validate_gemini_tts_key(GEMINI_TTS_API_KEY)
+            if not ok: raise PipelineError("Validation", f"Gemini key invalid: {msg}")
+            log("   ✅ Gemini key valid", logs); yield None, "\n".join(logs)
+
         # ── Download / Ingest ─────────────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
             progress(0.05, desc="Downloading/Ingesting…")
@@ -125,7 +146,19 @@ def run_pipeline(
             translated, logs = translate_segments(segments, logs, openrouter_key=openrouter_key, merge_config=m_cfg)
             
             progress(0.5, desc="Checking timing budget…")
-            active_voice = kokoro_voice if tts_engine.startswith("Kokoro") else (edge_tts_voice if tts_engine.startswith("Edge") else (google_tts_voice_name if tts_engine.startswith("Google") else "default"))
+            active_voice = (
+                kokoro_voice
+                if tts_engine.startswith("Kokoro")
+                else (
+                    edge_tts_voice
+                    if tts_engine.startswith("Edge")
+                    else (
+                        google_tts_voice_name
+                        if tts_engine.startswith("Google")
+                        else (gemini_single_voice if tts_engine.startswith("Gemini") else "default")
+                    )
+                )
+            )
             cps = get_cps_for_voice(tts_engine, active_voice)
             translated, logs = apply_timing_budget(translated, logs, openrouter_key=openrouter_key, cps=cps)
             
@@ -146,6 +179,23 @@ def run_pipeline(
                 timed_clips, logs = synthesize_segments_google_tts(utterances, job_dir, logs, api_key=GOOGLE_TTS_API_KEY, voice_type=google_tts_voice_type, voice_name=google_tts_voice_name, language_code=GOOGLE_TTS_LANGUAGE_CODE)
             elif tts_engine == "Edge TTS (cloud, no key)":
                 timed_clips, logs = synthesize_segments_edge_tts(utterances, job_dir, logs, voice=edge_tts_voice)
+            elif tts_engine == "Gemini 3.1 Flash TTS Preview":
+                if gemini_pricing_mode == "auto":
+                    log("   ℹ️  Gemini pricing mode auto selects cheapest estimate in UI; runtime uses real-time endpoint.", logs)
+                timed_clips, logs = synthesize_segments_gemini_tts(
+                    utterances,
+                    job_dir,
+                    logs,
+                    api_key=GEMINI_TTS_API_KEY,
+                    model=GEMINI_TTS_MODEL,
+                    single_voice=gemini_single_voice,
+                    multi_speaker=gemini_multi_speaker,
+                    speaker1_name=gemini_speaker1_name,
+                    speaker1_voice=gemini_speaker1_voice,
+                    speaker2_name=gemini_speaker2_name,
+                    speaker2_voice=gemini_speaker2_voice,
+                    assignment_mode=gemini_speaker_assignment,
+                )
             else:
                 timed_clips, logs = synthesize_segments(utterances, audio_path, job_dir, logs, speaker_wav=speaker_wav_path)
             

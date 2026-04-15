@@ -54,6 +54,23 @@ GOOGLE_TTS_LANGUAGE_CODE = os.getenv("GOOGLE_TTS_LANGUAGE_CODE", "pt-BR")
 GOOGLE_TTS_VOICE_TYPE = os.getenv("GOOGLE_TTS_VOICE_TYPE", "Neural2")
 GOOGLE_TTS_VOICE_NAME = os.getenv("GOOGLE_TTS_VOICE_NAME", "pt-BR-Neural2-A")
 
+# ── Gemini TTS config ───────────────────────────────────────────────────────
+GEMINI_TTS_API_KEY = os.getenv("GEMINI_TTS_API_KEY", "").strip()
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+GEMINI_TTS_PRICING_MODE = os.getenv("GEMINI_TTS_PRICING_MODE", "auto").strip().lower()
+GEMINI_TTS_SINGLE_VOICE = os.getenv("GEMINI_TTS_SINGLE_VOICE", "Kore")
+GEMINI_TTS_MULTI_SPEAKER = os.getenv("GEMINI_TTS_MULTI_SPEAKER", "false").strip().lower() == "true"
+GEMINI_TTS_SPEAKER_ASSIGNMENT = os.getenv("GEMINI_TTS_SPEAKER_ASSIGNMENT", "alternate")
+GEMINI_TTS_SPEAKER1_NAME = os.getenv("GEMINI_TTS_SPEAKER1_NAME", "Speaker1")
+GEMINI_TTS_SPEAKER1_VOICE = os.getenv("GEMINI_TTS_SPEAKER1_VOICE", "Kore")
+GEMINI_TTS_SPEAKER2_NAME = os.getenv("GEMINI_TTS_SPEAKER2_NAME", "Speaker2")
+GEMINI_TTS_SPEAKER2_VOICE = os.getenv("GEMINI_TTS_SPEAKER2_VOICE", "Puck")
+
+if GEMINI_TTS_PRICING_MODE not in {"auto", "standard", "batch"}:
+    GEMINI_TTS_PRICING_MODE = "auto"
+if GEMINI_TTS_SPEAKER_ASSIGNMENT not in {"alternate", "prefix"}:
+    GEMINI_TTS_SPEAKER_ASSIGNMENT = "alternate"
+
 # ── Edge TTS config ──────────────────────────────────────────────────────────
 EDGE_TTS_VOICE_NAME = os.getenv("EDGE_TTS_VOICE_NAME", "pt-BR-FranciscaNeural")
 
@@ -82,5 +99,11 @@ GOOGLE_TTS_VOICE_CATALOG = {
     "Neural2": ["pt-BR-Neural2-A", "pt-BR-Neural2-B", "pt-BR-Neural2-C"],
     "Polyglot (Preview)": [],
 }
+
+GEMINI_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+    "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+]
 
 JOB_MAX_AGE_H = 2
