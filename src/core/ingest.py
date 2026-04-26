@@ -3,7 +3,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from src.config import WORK_DIR
 from src.utils.helpers import log
 from src.core.translate import PipelineError
@@ -15,6 +15,78 @@ _YT_URL_PATTERN = re.compile(
 )
 
 _VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".ts", ".m4v"}
+
+
+def _cookie_opts(browser: str, cookies_file: str | None, logs: list) -> dict[str, Any]:
+    if cookies_file:
+        cookie_path = Path(cookies_file).expanduser()
+        if cookie_path.is_file():
+            return {"cookiefile": str(cookie_path)}
+        log(f"⚠️  cookies.txt not found: {cookies_file}. Falling back to browser/anonymous session.", logs)
+
+    if browser != "none":
+        return {"cookiesfrombrowser": (browser, None, None, None)}
+    return {}
+
+
+def _build_yt_download_profiles(job_dir: Path, cookie_opts: dict[str, Any], has_aria2c: bool, has_deno: bool) -> list[tuple[str, dict[str, Any]]]:
+    shared_opts: dict[str, Any] = {
+        "outtmpl": str(job_dir / "%(id)s_%(format_id)s.%(ext)s"),
+        "quiet": True,
+        "no_warnings": False,
+        "retries": 5,
+        "fragment_retries": 5,
+        "file_access_retries": 3,
+        "extractor_retries": 3,
+        "sleep_interval_requests": 0.25,
+        **cookie_opts,
+        **({"remote_components": ["ejs:github"]} if has_deno else {}),
+    }
+
+    aria2_opts: dict[str, Any] = {}
+    if has_aria2c:
+        aria2_opts = {
+            "external_downloader": "aria2c",
+            "external_downloader_args": {
+                "aria2c": [
+                    "--rpc-save-upload-metadata=false",
+                    "--file-allocation=none",
+                    "--optimize-concurrent-downloads=true",
+                    "--max-connection-per-server=4",
+                    "--min-split-size=5M",
+                    "--split=4",
+                    "--max-tries=5",
+                    "--retry-wait=3",
+                ]
+            },
+        }
+
+    yt_client_fallback = {
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "tv", "web"],
+            }
+        }
+    }
+
+    profiles: list[tuple[str, dict[str, Any]]] = []
+    if has_aria2c:
+        profiles.append(("aria2c", {**shared_opts, **aria2_opts}))
+    profiles.append(("builtin-http", {**shared_opts}))
+    profiles.append(("youtube-client-fallback", {**shared_opts, **yt_client_fallback}))
+    profiles.append(("youtube-client-ipv4", {**shared_opts, **yt_client_fallback, "forceipv4": True}))
+
+    # If authenticated mode fails (stale cookies / locked DB), try one anonymous profile.
+    if cookie_opts:
+        anon_shared = {k: v for k, v in shared_opts.items() if k not in {"cookiefile", "cookiesfrombrowser"}}
+        profiles.append(("anonymous-ipv4", {**anon_shared, **yt_client_fallback, "forceipv4": True}))
+
+    return profiles
+
+
+def _summarize_exc(exc: Exception) -> str:
+    text = " ".join(str(exc).split())
+    return text[:180] if len(text) > 180 else text
 
 def get_video_metadata(url: str, upload_path: str | None) -> dict:
     """Quickly fetch duration and title without full download/ingest."""
@@ -78,37 +150,57 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     import yt_dlp as yt
     log("📥 Downloading video with yt-dlp…", logs)
     video_path, audio_path = job_dir / "video.mp4", job_dir / "audio_orig.wav"
-    
-    _aria2c = shutil.which("aria2c")
-    _deno = shutil.which("deno")
-    
-    BASE_OPTS: dict[str, Any] = {
-        "outtmpl": str(job_dir / "%(id)s_%(format_id)s.%(ext)s"),
-        "quiet": True, "no_warnings": False,
-        **( {"cookiefile": cookies_file} if cookies_file else ({"cookiesfrombrowser": (browser, None, None, None)} if browser != "none" else {}) ),
-        **({"remote_components": ["ejs:github"]} if _deno else {}),
-        **({ "external_downloader": "aria2c", "external_downloader_args": {"aria2c": ["--rpc-save-upload-metadata=false", "--file-allocation=none", "--optimize-concurrent-downloads=true", "--max-connection-per-server=4", "--min-split-size=5M", "--split=4", "--max-tries=5", "--retry-wait=3"]} } if _aria2c else {}),
-    }
+
+    has_aria2c = bool(shutil.which("aria2c"))
+    has_deno = bool(shutil.which("deno"))
+    cookies = _cookie_opts(browser=browser, cookies_file=cookies_file, logs=logs)
+    profiles = _build_yt_download_profiles(job_dir=job_dir, cookie_opts=cookies, has_aria2c=has_aria2c, has_deno=has_deno)
+
+    if has_aria2c:
+        log("   aria2c detected: enabling fast profile with automatic fallback to built-in downloader.", logs)
 
     title, duration = "video", 0
     try:
-        with yt.YoutubeDL({**BASE_OPTS, "skip_download": True}) as ydl:
+        with yt.YoutubeDL({**profiles[0][1], "skip_download": True}) as ydl:
             info = ydl.extract_info(url, download=False)
             title, duration = info.get("title", "video"), info.get("duration", 0)
     except Exception as e: log(f"⚠️  Probe failed ({e}), continuing anyway…", logs)
 
     VIDEO_FORMATS = ["bestvideo[ext=mp4]", "bestvideo", "best[ext=mp4]", "best", "18"]
     muxed_fallback, raw_video_file = False, None
-    for fmt in VIDEO_FORMATS:
-        try:
-            with yt.YoutubeDL({**BASE_OPTS, "format": fmt, "outtmpl": str(job_dir / "video_raw.%(ext)s")}) as ydl: ydl.extract_info(url, download=True)
-            candidates = list(job_dir.glob("video_raw.*"))
-            if candidates:
-                raw_video_file = candidates[0]
-                muxed_fallback = fmt in ("best[ext=mp4]", "best", "18")
-                break
-        except Exception: continue
-    if not raw_video_file: raise RuntimeError("All video formats failed.")
+    selected_profile_idx = 0
+    video_errors: list[str] = []
+    for profile_idx, (profile_name, profile_opts) in enumerate(profiles):
+        if profile_idx > 0:
+            log(f"   Retrying with profile: {profile_name}", logs)
+
+        for fmt in VIDEO_FORMATS:
+            for stale in job_dir.glob("video_raw.*"):
+                stale.unlink(missing_ok=True)
+
+            try:
+                with yt.YoutubeDL({**profile_opts, "format": fmt, "outtmpl": str(job_dir / "video_raw.%(ext)s")}) as ydl:
+                    ydl.extract_info(url, download=True)
+
+                candidates = list(job_dir.glob("video_raw.*"))
+                if candidates:
+                    raw_video_file = candidates[0]
+                    muxed_fallback = fmt in ("best[ext=mp4]", "best", "18")
+                    selected_profile_idx = profile_idx
+                    break
+            except Exception as e:
+                msg = _summarize_exc(e)
+                if msg and msg not in video_errors:
+                    video_errors.append(msg)
+                continue
+
+        if raw_video_file:
+            break
+
+    if not raw_video_file:
+        hint = " Use Browser Cookies or a fresh cookies.txt if the video is age/member restricted." if any("403" in e for e in video_errors) else ""
+        summary = f" Last errors: {' | '.join(video_errors[:3])}." if video_errors else ""
+        raise RuntimeError(f"All video formats failed.{summary}{hint}")
     shutil.move(str(raw_video_file), str(video_path))
 
     if muxed_fallback:
@@ -116,15 +208,42 @@ def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", c
     else:
         AUDIO_FORMATS = ["bestaudio[ext=m4a]", "bestaudio[ext=webm]", "bestaudio", "140", "139"]
         raw_audio_file = None
-        for fmt in AUDIO_FORMATS:
-            try:
-                with yt.YoutubeDL({**BASE_OPTS, "format": fmt, "outtmpl": str(job_dir / "audio_raw.%(ext)s"), "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "0"}]}) as ydl: ydl.extract_info(url, download=True)
-                candidates = list(job_dir.glob("audio_raw.*"))
-                if candidates:
-                    raw_audio_file = candidates[0]
-                    break
-            except Exception: continue
+        audio_errors: list[str] = []
+
+        ordered_audio_profiles = profiles[selected_profile_idx:] + profiles[:selected_profile_idx]
+        for profile_idx, (profile_name, profile_opts) in enumerate(ordered_audio_profiles):
+            if profile_idx > 0:
+                log(f"   Audio retry with profile: {profile_name}", logs)
+
+            for fmt in AUDIO_FORMATS:
+                for stale in job_dir.glob("audio_raw.*"):
+                    stale.unlink(missing_ok=True)
+
+                try:
+                    with yt.YoutubeDL({
+                        **profile_opts,
+                        "format": fmt,
+                        "outtmpl": str(job_dir / "audio_raw.%(ext)s"),
+                        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "0"}],
+                    }) as ydl:
+                        ydl.extract_info(url, download=True)
+
+                    candidates = list(job_dir.glob("audio_raw.*"))
+                    if candidates:
+                        raw_audio_file = candidates[0]
+                        break
+                except Exception as e:
+                    msg = _summarize_exc(e)
+                    if msg and msg not in audio_errors:
+                        audio_errors.append(msg)
+                    continue
+
+            if raw_audio_file:
+                break
+
         if not raw_audio_file:
+            if audio_errors:
+                log(f"⚠️  Audio stream download failed, extracting from muxed video instead. ({audio_errors[0]})", logs)
             subprocess.run(["ffmpeg", "-y", "-i", str(video_path), "-vn", "-ar", "44100", "-ac", "2", "-f", "wav", str(audio_path)], check=True)
         else: shutil.move(str(raw_audio_file), str(audio_path))
 
