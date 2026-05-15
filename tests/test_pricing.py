@@ -43,3 +43,7 @@ def test_elevenlabs_cost_increases_with_duration():
 
 def test_elevenlabs_cost_is_zero_for_negative_duration():
     assert estimate_elevenlabs_tts_cost(-5.0) == 0.0
+
+
+def test_elevenlabs_cost_is_zero_for_zero_duration():
+    assert estimate_elevenlabs_tts_cost(0.0) == 0.0

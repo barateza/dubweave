@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 
 _REDACT_PATTERNS: list[str] = []
+VOICE_ID_DISPLAY_LENGTH = 8
 
 def init_redact_patterns() -> None:
     """Build redaction list from current API key env vars."""
@@ -110,7 +111,9 @@ def list_elevenlabs_voices(api_key: str) -> list[tuple[str, str]]:
             voice_id = (voice.get("voice_id") or "").strip()
             name = (voice.get("name") or "").strip() or voice_id
             if voice_id:
-                options.append((f"{name} ({voice_id[:8]}…)", voice_id))
+                short_id = voice_id[:VOICE_ID_DISPLAY_LENGTH]
+                suffix = "…" if len(voice_id) > VOICE_ID_DISPLAY_LENGTH else ""
+                options.append((f"{name} ({short_id}{suffix})", voice_id))
         options.sort(key=lambda item: item[0].lower())
         return options
     except Exception:

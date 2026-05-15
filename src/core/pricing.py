@@ -81,6 +81,8 @@ def estimate_audio_tokens_for_duration(duration_seconds: float, tokens_per_secon
 
 def estimate_elevenlabs_tts_cost(duration_seconds: float, usd_per_1k_chars: float = ELEVENLABS_USD_PER_1K_CHARS) -> float:
     """Estimate ElevenLabs cost from generated text characters."""
+    if duration_seconds <= 0:
+        return 0.0
     est_chars, _ = estimate_text_from_duration(duration_seconds)
     return (est_chars / 1000.0) * usd_per_1k_chars
 

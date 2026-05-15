@@ -224,6 +224,7 @@ def synthesize_segments_elevenlabs_tts(
 ):
     import urllib.request
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    max_workers = 8
 
     api_key = api_key.strip()
     voice_id = voice_id.strip()
@@ -264,15 +265,19 @@ def synthesize_segments_elevenlabs_tts(
                 probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(out_raw)], capture_output=True, text=True)
                 synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
                 ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
-                subprocess.run(["ffmpeg", "-y", "-i", str(out_raw), "-filter:a", f"atempo={ratio:.4f}", "-ar", "44100", str(out_clip)], capture_output=True)
+                subprocess.run(["ffmpeg", "-y", "-i", str(out_raw), "-filter:a", f"atempo={ratio:.4f}", "-ar", "44100", str(out_clip)], capture_output=True, check=True)
             else:
                 shutil.copy(str(out_raw), str(out_clip))
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr.decode(errors="ignore") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")).strip()
+            errors.append(f"   ⚠️  ElevenLabs ffmpeg conversion failed (segment {idx}): {stderr or exc}")
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5", str(out_clip)], capture_output=True)
         except Exception as exc:
             errors.append(f"   ⚠️  ElevenLabs TTS failed (segment {idx}): {exc}")
             subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5", str(out_clip)], capture_output=True)
         return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
 
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_synthesize_one, i, seg): i for i, seg in enumerate(segments)}
         for f in as_completed(futures):
             results[futures[f]] = f.result()
