@@ -2,8 +2,17 @@ import os
 import shutil
 import platform
 from pathlib import Path
-from src.config import __version__, WHISPER_MODEL, GOOGLE_TTS_API_KEY, ELEVENLABS_API_KEY, OPENROUTER_API_KEY, ROOT_DIR
+
+from src.config import (
+    __version__,
+    WHISPER_MODEL,
+    GOOGLE_TTS_API_KEY,
+    ELEVENLABS_API_KEY,
+    OPENROUTER_API_KEY,
+    ROOT_DIR,
+)
 from src.utils.security import redact
+
 
 def validate_environment() -> list[str]:
     """Check required tools at startup; return list of warning strings."""
@@ -29,14 +38,31 @@ def validate_environment() -> list[str]:
         )
 
     try:
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        warnings_list.append(
+            "⚠️  onnxruntime not installed — Supertonic TTS will fail."
+        )
+
+    try:
+        import supertonic  # noqa: F401
+    except ImportError:
+        warnings_list.append(
+            "⚠️  supertonic not installed — Supertonic local TTS is unavailable."
+        )
+
+    try:
         import torch
+
         if not torch.cuda.is_available():
             warnings_list.append(
                 "⚠️  CUDA not available — GPU acceleration disabled. "
                 "Ensure NVIDIA drivers are installed and `nvidia-smi` shows your GPU."
             )
     except ImportError:
-        warnings_list.append("⚠️  PyTorch not installed — GPU acceleration unavailable.")
+        warnings_list.append(
+            "⚠️  PyTorch not installed — GPU acceleration unavailable."
+        )
 
     env_path = ROOT_DIR / ".env"
     env_example_path = ROOT_DIR / ".env.example"
@@ -52,29 +78,51 @@ def validate_environment() -> list[str]:
                 "Create a .env file to configure API keys and model choices."
             )
 
+    try:
+        from src.config import SUPERTONIC_ASSETS_DIR
+
+        if SUPERTONIC_ASSETS_DIR:
+            assets_path = Path(SUPERTONIC_ASSETS_DIR)
+            if not assets_path.exists():
+                warnings_list.append(
+                    f"⚠️  SUPERTONIC_ASSETS_DIR does not exist: {assets_path}. Supertonic auto-download may still work if enabled."
+                )
+    except Exception:
+        pass
+
     return warnings_list
+
 
 def release_gpu_memory() -> None:
     """Force GPU memory release between pipeline stages."""
     import gc
+
     gc.collect()
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
     except ImportError:
         pass
 
+
 def log_startup_info() -> None:
     """Print environment diagnostics to stdout at application startup."""
     print(f"[startup] Dubweave v{__version__} starting")
-    print(f"[startup] Python {platform.python_version()} on {platform.system()} {platform.release()}")
+    print(
+        f"[startup] Python {platform.python_version()} on {platform.system()} {platform.release()}"
+    )
     try:
         import torch
+
         if torch.cuda.is_available():
             import torch.version as _torch_version
-            print(f"[startup] CUDA {_torch_version.cuda} — {torch.cuda.get_device_name(0)}")
+
+            print(
+                f"[startup] CUDA {_torch_version.cuda} — {torch.cuda.get_device_name(0)}"
+            )
             vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[startup] VRAM: {vram_gb:.1f} GB")
         else:
@@ -83,12 +131,18 @@ def log_startup_info() -> None:
         print("[startup] PyTorch not installed")
 
     print(f"[startup] Whisper model: {WHISPER_MODEL}")
-    tts_engines = "Kokoro, XTTS v2"
+    tts_engines = ["Kokoro", "XTTS v2"]
+    try:
+        import supertonic  # noqa: F401
+
+        tts_engines.append("Supertonic")
+    except ImportError:
+        pass
     if GOOGLE_TTS_API_KEY:
-        tts_engines += ", Google Cloud TTS"
+        tts_engines.append("Google Cloud TTS")
     if ELEVENLABS_API_KEY:
-        tts_engines += ", ElevenLabs TTS"
-    print(f"[startup] TTS engines available: {tts_engines}")
+        tts_engines.append("ElevenLabs TTS")
+    print(f"[startup] TTS engines available: {', '.join(tts_engines)}")
     if OPENROUTER_API_KEY:
         print(f"[startup] OpenRouter: configured ({redact(OPENROUTER_API_KEY)})")
     else:

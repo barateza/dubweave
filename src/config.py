@@ -36,6 +36,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
 
+
 def _int_env(name: str, default: int) -> int:
     val = os.getenv(name, "").strip()
     if not val:
@@ -44,6 +45,7 @@ def _int_env(name: str, default: int) -> int:
         return int(val)
     except ValueError:
         return default
+
 
 OPENROUTER_CHUNK_SIZE = max(1, _int_env("OPENROUTER_CHUNK_SIZE", 120))
 OPENROUTER_CONTEXT_SIZE = max(0, _int_env("OPENROUTER_CONTEXT_SIZE", 8))
@@ -59,7 +61,9 @@ GEMINI_TTS_API_KEY = os.getenv("GEMINI_TTS_API_KEY", "").strip()
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 GEMINI_TTS_PRICING_MODE = os.getenv("GEMINI_TTS_PRICING_MODE", "auto").strip().lower()
 GEMINI_TTS_SINGLE_VOICE = os.getenv("GEMINI_TTS_SINGLE_VOICE", "Kore")
-GEMINI_TTS_MULTI_SPEAKER = os.getenv("GEMINI_TTS_MULTI_SPEAKER", "false").strip().lower() == "true"
+GEMINI_TTS_MULTI_SPEAKER = (
+    os.getenv("GEMINI_TTS_MULTI_SPEAKER", "false").strip().lower() == "true"
+)
 GEMINI_TTS_SPEAKER_ASSIGNMENT = os.getenv("GEMINI_TTS_SPEAKER_ASSIGNMENT", "alternate")
 GEMINI_TTS_SPEAKER1_NAME = os.getenv("GEMINI_TTS_SPEAKER1_NAME", "Speaker1")
 GEMINI_TTS_SPEAKER1_VOICE = os.getenv("GEMINI_TTS_SPEAKER1_VOICE", "Kore")
@@ -74,6 +78,29 @@ if GEMINI_TTS_SPEAKER_ASSIGNMENT not in {"alternate", "prefix"}:
 # ── Edge TTS config ──────────────────────────────────────────────────────────
 EDGE_TTS_VOICE_NAME = os.getenv("EDGE_TTS_VOICE_NAME", "pt-BR-FranciscaNeural")
 
+# ── Supertonic v3 config ───────────────────────────────────────────────────
+SUPERTONIC_AUTO_DOWNLOAD = (
+    os.getenv("SUPERTONIC_AUTO_DOWNLOAD", "true").strip().lower() != "false"
+)
+SUPERTONIC_ASSETS_DIR = os.getenv("SUPERTONIC_ASSETS_DIR", "").strip()
+SUPERTONIC_MODEL_REPO = os.getenv("SUPERTONIC_MODEL_REPO", "Supertone/supertonic")
+SUPERTONIC_MODEL_REVISION = os.getenv("SUPERTONIC_MODEL_REVISION", "").strip()
+SUPERTONIC_INTRA_OP_THREADS = _int_env("SUPERTONIC_INTRA_OP_THREADS", 0)
+SUPERTONIC_INTER_OP_THREADS = _int_env("SUPERTONIC_INTER_OP_THREADS", 0)
+SUPERTONIC_LOG_LEVEL = (
+    os.getenv("SUPERTONIC_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+)
+SUPERTONIC_DEFAULT_VOICE = (
+    os.getenv("SUPERTONIC_DEFAULT_VOICE", "M4").strip().upper() or "M4"
+)
+SUPERTONIC_DEFAULT_LANG = (
+    os.getenv("SUPERTONIC_DEFAULT_LANG", "pt").strip().lower() or "pt"
+)
+SUPERTONIC_ALLOWED_TAGS = ["laugh", "breath", "sigh"]
+
+SUPERTONIC_VOICE_OPTIONS = ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"]
+SUPERTONIC_LANGUAGE_OPTIONS = ["en", "ko", "es", "pt", "fr"]
+
 EDGE_TTS_PT_BR_VOICES = [
     "pt-BR-FranciscaNeural",
     "pt-BR-AntonioNeural",
@@ -82,33 +109,95 @@ EDGE_TTS_PT_BR_VOICES = [
 
 GOOGLE_TTS_VOICE_CATALOG = {
     "Chirp3 HD": [
-        "pt-BR-Chirp3-HD-Achernar", "pt-BR-Chirp3-HD-Achird", "pt-BR-Chirp3-HD-Algenib",
-        "pt-BR-Chirp3-HD-Algieba", "pt-BR-Chirp3-HD-Alnilam", "pt-BR-Chirp3-HD-Aoede",
-        "pt-BR-Chirp3-HD-Autonoe", "pt-BR-Chirp3-HD-Callirrhoe", "pt-BR-Chirp3-HD-Charon",
-        "pt-BR-Chirp3-HD-Despina", "pt-BR-Chirp3-HD-Enceladus", "pt-BR-Chirp3-HD-Erinome",
-        "pt-BR-Chirp3-HD-Fenrir", "pt-BR-Chirp3-HD-Gacrux", "pt-BR-Chirp3-HD-Iapetus",
-        "pt-BR-Chirp3-HD-Kore", "pt-BR-Chirp3-HD-Laomedeia", "pt-BR-Chirp3-HD-Leda",
-        "pt-BR-Chirp3-HD-Orus", "pt-BR-Chirp3-HD-Puck", "pt-BR-Chirp3-HD-Pulcherrima",
-        "pt-BR-Chirp3-HD-Rasalgethi", "pt-BR-Chirp3-HD-Sadachbia", "pt-BR-Chirp3-HD-Sadaltager",
-        "pt-BR-Chirp3-HD-Schedar", "pt-BR-Chirp3-HD-Sulafat", "pt-BR-Chirp3-HD-Umbriel",
-        "pt-BR-Chirp3-HD-Vindemiatrix", "pt-BR-Chirp3-HD-Zephyr", "pt-BR-Chirp3-HD-Zubenelgenubi",
+        "pt-BR-Chirp3-HD-Achernar",
+        "pt-BR-Chirp3-HD-Achird",
+        "pt-BR-Chirp3-HD-Algenib",
+        "pt-BR-Chirp3-HD-Algieba",
+        "pt-BR-Chirp3-HD-Alnilam",
+        "pt-BR-Chirp3-HD-Aoede",
+        "pt-BR-Chirp3-HD-Autonoe",
+        "pt-BR-Chirp3-HD-Callirrhoe",
+        "pt-BR-Chirp3-HD-Charon",
+        "pt-BR-Chirp3-HD-Despina",
+        "pt-BR-Chirp3-HD-Enceladus",
+        "pt-BR-Chirp3-HD-Erinome",
+        "pt-BR-Chirp3-HD-Fenrir",
+        "pt-BR-Chirp3-HD-Gacrux",
+        "pt-BR-Chirp3-HD-Iapetus",
+        "pt-BR-Chirp3-HD-Kore",
+        "pt-BR-Chirp3-HD-Laomedeia",
+        "pt-BR-Chirp3-HD-Leda",
+        "pt-BR-Chirp3-HD-Orus",
+        "pt-BR-Chirp3-HD-Puck",
+        "pt-BR-Chirp3-HD-Pulcherrima",
+        "pt-BR-Chirp3-HD-Rasalgethi",
+        "pt-BR-Chirp3-HD-Sadachbia",
+        "pt-BR-Chirp3-HD-Sadaltager",
+        "pt-BR-Chirp3-HD-Schedar",
+        "pt-BR-Chirp3-HD-Sulafat",
+        "pt-BR-Chirp3-HD-Umbriel",
+        "pt-BR-Chirp3-HD-Vindemiatrix",
+        "pt-BR-Chirp3-HD-Zephyr",
+        "pt-BR-Chirp3-HD-Zubenelgenubi",
     ],
-    "WaveNet": ["pt-BR-Wavenet-A", "pt-BR-Wavenet-B", "pt-BR-Wavenet-C", "pt-BR-Wavenet-D", "pt-BR-Wavenet-E"],
-    "Standard": ["pt-BR-Standard-A", "pt-BR-Standard-B", "pt-BR-Standard-C", "pt-BR-Standard-D", "pt-BR-Standard-E"],
+    "WaveNet": [
+        "pt-BR-Wavenet-A",
+        "pt-BR-Wavenet-B",
+        "pt-BR-Wavenet-C",
+        "pt-BR-Wavenet-D",
+        "pt-BR-Wavenet-E",
+    ],
+    "Standard": [
+        "pt-BR-Standard-A",
+        "pt-BR-Standard-B",
+        "pt-BR-Standard-C",
+        "pt-BR-Standard-D",
+        "pt-BR-Standard-E",
+    ],
     "Studio": ["pt-BR-Studio-B", "pt-BR-Studio-C"],
     "Neural2": ["pt-BR-Neural2-A", "pt-BR-Neural2-B", "pt-BR-Neural2-C"],
     "Polyglot (Preview)": [],
 }
 
 GEMINI_TTS_VOICES = [
-    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
-    "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+    "Zephyr",
+    "Puck",
+    "Charon",
+    "Kore",
+    "Fenrir",
+    "Leda",
+    "Orus",
+    "Aoede",
+    "Callirrhoe",
+    "Autonoe",
+    "Enceladus",
+    "Iapetus",
+    "Umbriel",
+    "Algieba",
+    "Despina",
+    "Erinome",
+    "Algenib",
+    "Rasalgethi",
+    "Laomedeia",
+    "Achernar",
+    "Alnilam",
+    "Schedar",
+    "Gacrux",
+    "Pulcherrima",
+    "Achird",
+    "Zubenelgenubi",
+    "Vindemiatrix",
+    "Sadachbia",
+    "Sadaltager",
+    "Sulafat",
 ]
 
 # ── ElevenLabs TTS config ────────────────────────────────────────────────────
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
-ELEVENLABS_TTS_MODEL_ID = os.getenv("ELEVENLABS_TTS_MODEL_ID", "eleven_multilingual_v2").strip() or "eleven_multilingual_v2"
+ELEVENLABS_TTS_MODEL_ID = (
+    os.getenv("ELEVENLABS_TTS_MODEL_ID", "eleven_multilingual_v2").strip()
+    or "eleven_multilingual_v2"
+)
 ELEVENLABS_TTS_VOICE_ID = os.getenv("ELEVENLABS_TTS_VOICE_ID", "").strip()
 
 JOB_MAX_AGE_H = 2

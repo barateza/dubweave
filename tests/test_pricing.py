@@ -3,6 +3,7 @@ from src.core.pricing import (
     estimate_elevenlabs_tts_cost,
     estimate_gemini_tts_cost_for_mode,
     estimate_google_tts_cost,
+    estimate_local_tts_cost,
     estimate_openrouter_translation_cost,
     pick_gemini_tts_cost,
 )
@@ -31,7 +32,9 @@ def test_google_cost_falls_back_to_neural2_for_unknown_type():
 
 def test_openrouter_flash_lite_uses_lite_rates():
     regular = estimate_openrouter_translation_cost(120.0, "google/gemini-2.0-flash-001")
-    lite = estimate_openrouter_translation_cost(120.0, "google/gemini-2.0-flash-lite-001")
+    lite = estimate_openrouter_translation_cost(
+        120.0, "google/gemini-2.0-flash-lite-001"
+    )
     assert lite < regular
 
 
@@ -47,3 +50,7 @@ def test_elevenlabs_cost_is_zero_for_negative_duration():
 
 def test_elevenlabs_cost_is_zero_for_zero_duration():
     assert estimate_elevenlabs_tts_cost(0.0) == 0.0
+
+
+def test_local_tts_cost_is_zero():
+    assert estimate_local_tts_cost(600.0) == 0.0

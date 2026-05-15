@@ -148,6 +148,13 @@ The estimator now supports Gemini token pricing and always shows one final synth
 
 If you provide **ELEVENLABS_API_KEY**, Dubweave enables **ElevenLabs TTS** as an additional synthesis engine. The UI loads your account voices into a dropdown and uses a configurable model ID (`ELEVENLABS_TTS_MODEL_ID`). Current scope is single-speaker synthesis.
 
+### Supertonic v3 (Local)
+
+When the `supertonic` Python package is installed, Dubweave can use **Supertonic v3** as a local on-device TTS engine. It auto-downloads model assets on first run unless `SUPERTONIC_AUTO_DOWNLOAD=false`, and you can point `SUPERTONIC_ASSETS_DIR` at an existing cache for offline setups.
+
+Dubweave exposes the full Supertonic voice set (`M1`-`M5`, `F1`-`F5`) and supported languages (`en`, `ko`, `es`, `pt`, `fr`). Local synthesis is treated as free in the UI estimate.
+Supertonic follows the installed ONNX Runtime backend automatically, so GPU acceleration is available when your environment uses the GPU runtime and CPU is the fallback otherwise.
+
 ### Project Management & Pipeline Resume
 
 Every run is saved as a named project under `projects/`. You can resume from any stage — **download**, **transcribe**, **translate**, **synthesize**, or **assemble** — without rerunning earlier steps. The UI shows a live status badge for each completed stage, so you can see at a glance what's already been done.

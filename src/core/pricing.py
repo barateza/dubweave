@@ -44,7 +44,6 @@ class GeminiCostEstimate:
     total_cost_usd: float
 
 
-
 def estimate_text_from_duration(duration_seconds: float) -> tuple[float, float]:
     """Estimate text chars/tokens from media duration using stable heuristics."""
     minutes = max(0.0, duration_seconds) / 60.0
@@ -53,8 +52,9 @@ def estimate_text_from_duration(duration_seconds: float) -> tuple[float, float]:
     return est_chars, est_tokens
 
 
-
-def estimate_openrouter_translation_cost(duration_seconds: float, model_name: str) -> float:
+def estimate_openrouter_translation_cost(
+    duration_seconds: float, model_name: str
+) -> float:
     """Estimate translation cost with model-specific OpenRouter rates."""
     _, est_tokens = estimate_text_from_duration(duration_seconds)
     in_price = OPENROUTER_DEFAULT_INPUT_USD_PER_MILLION
@@ -65,21 +65,30 @@ def estimate_openrouter_translation_cost(duration_seconds: float, model_name: st
     return (est_tokens * (in_price + out_price)) / 1_000_000
 
 
-
 def estimate_google_tts_cost(duration_seconds: float, voice_type: str) -> float:
     """Estimate Google Cloud TTS cost by voice family and duration."""
     est_chars, _ = estimate_text_from_duration(duration_seconds)
-    rate = GOOGLE_TTS_USD_PER_MILLION_CHARS.get(voice_type, GOOGLE_TTS_USD_PER_MILLION_CHARS["Neural2"])
+    rate = GOOGLE_TTS_USD_PER_MILLION_CHARS.get(
+        voice_type, GOOGLE_TTS_USD_PER_MILLION_CHARS["Neural2"]
+    )
     return (est_chars * rate) / 1_000_000
 
 
-
-def estimate_audio_tokens_for_duration(duration_seconds: float, tokens_per_second: float = GEMINI_TTS_AUDIO_TOKENS_PER_SECOND) -> float:
+def estimate_audio_tokens_for_duration(
+    duration_seconds: float,
+    tokens_per_second: float = GEMINI_TTS_AUDIO_TOKENS_PER_SECOND,
+) -> float:
     return max(0.0, duration_seconds) * tokens_per_second
 
 
+def estimate_local_tts_cost(duration_seconds: float) -> float:
+    """Local on-device TTS is treated as free."""
+    return 0.0
 
-def estimate_elevenlabs_tts_cost(duration_seconds: float, usd_per_1k_chars: float = ELEVENLABS_USD_PER_1K_CHARS) -> float:
+
+def estimate_elevenlabs_tts_cost(
+    duration_seconds: float, usd_per_1k_chars: float = ELEVENLABS_USD_PER_1K_CHARS
+) -> float:
     """Estimate ElevenLabs cost from generated text characters."""
     if duration_seconds <= 0:
         return 0.0
@@ -87,8 +96,9 @@ def estimate_elevenlabs_tts_cost(duration_seconds: float, usd_per_1k_chars: floa
     return (est_chars / 1000.0) * usd_per_1k_chars
 
 
-
-def estimate_gemini_tts_cost_for_mode(duration_seconds: float, mode: str) -> GeminiCostEstimate:
+def estimate_gemini_tts_cost_for_mode(
+    duration_seconds: float, mode: str
+) -> GeminiCostEstimate:
     """Estimate Gemini TTS synthesis cost for a single mode."""
     _, text_tokens = estimate_text_from_duration(duration_seconds)
     audio_tokens = estimate_audio_tokens_for_duration(duration_seconds)
@@ -105,8 +115,9 @@ def estimate_gemini_tts_cost_for_mode(duration_seconds: float, mode: str) -> Gem
     )
 
 
-
-def pick_gemini_tts_cost(duration_seconds: float, preferred_mode: str = "auto") -> GeminiCostEstimate:
+def pick_gemini_tts_cost(
+    duration_seconds: float, preferred_mode: str = "auto"
+) -> GeminiCostEstimate:
     """Return one final Gemini estimate. Auto mode picks the cheapest option."""
     preferred = (preferred_mode or "auto").strip().lower()
     standard_estimate = estimate_gemini_tts_cost_for_mode(duration_seconds, "standard")
