@@ -8,19 +8,22 @@ from src.config import (
     GEMINI_TTS_MULTI_SPEAKER, GEMINI_TTS_SPEAKER_ASSIGNMENT,
     GEMINI_TTS_SPEAKER1_NAME, GEMINI_TTS_SPEAKER1_VOICE,
     GEMINI_TTS_SPEAKER2_NAME, GEMINI_TTS_SPEAKER2_VOICE, GEMINI_TTS_VOICES,
+    ELEVENLABS_API_KEY, ELEVENLABS_TTS_MODEL_ID, ELEVENLABS_TTS_VOICE_ID,
 )
 from src.utils.system import validate_environment
 from src.utils.project import project_status, generate_srt_for_project
+from src.utils.security import list_elevenlabs_voices
 from src.core.ingest import get_video_metadata
 from src.core.pricing import (
     estimate_openrouter_translation_cost,
     estimate_google_tts_cost,
     pick_gemini_tts_cost,
+    estimate_elevenlabs_tts_cost,
 )
 from src.pipeline import run_pipeline
 from src.ui.styles import CSS
 
-def update_cost_info(engine, google_type, meta, gemini_mode):
+def update_cost_info(engine, google_type, meta, gemini_mode, elevenlabs_model):
     parts = []
     dur = meta.get("duration", 0.0)
 
@@ -45,6 +48,13 @@ def update_cost_info(engine, google_type, meta, gemini_mode):
                 "</div>"
             )
         )
+
+    if engine == "ElevenLabs TTS":
+        total_tts = estimate_elevenlabs_tts_cost(dur)
+        model_lbl = (elevenlabs_model or ELEVENLABS_TTS_MODEL_ID).strip()
+        parts.append(
+            f"<div><span class='service'>🔊 Synthesis (ElevenLabs: {model_lbl})</span>: ~<strong>${total_tts:.4f}</strong> total est.</div>"
+        )
     
     if not parts:
         return ""
@@ -52,13 +62,15 @@ def update_cost_info(engine, google_type, meta, gemini_mode):
     header = f"<div style='margin-bottom:8px;font-size:0.7rem;opacity:0.8;'>Estimating for <strong>{dur:.1f}s</strong> ({meta.get('title', 'Unknown')[:30]}...)</div>" if dur > 0 else ""
     return f"<div class='cost-info'>{header}{''.join(parts)}</div>"
 
-def on_input_change(url, upload, engine, g_type, gemini_mode):
+def on_input_change(url, upload, engine, g_type, gemini_mode, elevenlabs_model):
     meta = get_video_metadata(url, upload)
-    cost = update_cost_info(engine, g_type, meta, gemini_mode)
+    cost = update_cost_info(engine, g_type, meta, gemini_mode, elevenlabs_model)
     return meta, cost
 
 def build_ui():
     env_warnings = validate_environment()
+    elevenlabs_voice_choices = list_elevenlabs_voices(ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else []
+    elevenlabs_default_voice = ELEVENLABS_TTS_VOICE_ID or (elevenlabs_voice_choices[0][1] if elevenlabs_voice_choices else "")
 
     with gr.Blocks(title="Dubweave — PT-BR", css=CSS) as demo:
         gr.HTML("""
@@ -123,6 +135,8 @@ def build_ui():
                 tts_choices.append("Google Cloud TTS")
             if GEMINI_TTS_API_KEY:
                 tts_choices.append("Gemini 3.1 Flash TTS Preview")
+            if ELEVENLABS_API_KEY:
+                tts_choices.append("ElevenLabs TTS")
 
             tts_engine_input = gr.Radio(choices=tts_choices, value="Kokoro (fast, PT-BR native)", label="TTS engine")
             kokoro_voice_input = gr.Dropdown(choices=["pf_dora", "pm_alex", "pm_santa"], value=KOKORO_VOICE, label="Kokoro voice", visible=True)
@@ -161,32 +175,51 @@ def build_ui():
                         gemini_speaker2_name_input = gr.Textbox(value=GEMINI_TTS_SPEAKER2_NAME, label="Speaker 2 name")
                         gemini_speaker2_voice_input = gr.Dropdown(choices=GEMINI_TTS_VOICES, value=GEMINI_TTS_SPEAKER2_VOICE, label="Speaker 2 voice")
 
-            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE, {"duration": 0}, GEMINI_TTS_PRICING_MODE))
+            with gr.Column(visible=False) as elevenlabs_tts_col:
+                elevenlabs_model_input = gr.Textbox(
+                    value=ELEVENLABS_TTS_MODEL_ID,
+                    label="ElevenLabs model ID",
+                )
+                elevenlabs_voice_input = gr.Dropdown(
+                    choices=elevenlabs_voice_choices,
+                    value=elevenlabs_default_voice if elevenlabs_default_voice else None,
+                    label="ElevenLabs voice (from your account)",
+                    allow_custom_value=False,
+                )
 
-            def on_tts_change(engine, g_type, meta, gemini_mode, gemini_multi):
+            cost_info_html = gr.HTML(update_cost_info("Kokoro (fast, PT-BR native)", GOOGLE_TTS_VOICE_TYPE, {"duration": 0}, GEMINI_TTS_PRICING_MODE, ELEVENLABS_TTS_MODEL_ID))
+
+            def on_tts_change(engine, g_type, meta, gemini_mode, gemini_multi, elevenlabs_model):
                 v_kokoro = gr.update(visible=engine.startswith("Kokoro"))
                 v_edge = gr.update(visible=engine.startswith("Edge"))
                 v_google = gr.update(visible=engine.startswith("Google"))
                 v_gemini = gr.update(visible=engine.startswith("Gemini"))
+                v_elevenlabs = gr.update(visible=engine.startswith("ElevenLabs"))
                 v_gemini_single = gr.update(visible=engine.startswith("Gemini") and not gemini_multi)
                 v_gemini_multi = gr.update(visible=engine.startswith("Gemini") and gemini_multi)
-                cost = update_cost_info(engine, g_type, meta, gemini_mode)
-                return v_kokoro, v_edge, v_google, v_gemini, v_gemini_single, v_gemini_multi, cost
+                cost = update_cost_info(engine, g_type, meta, gemini_mode, elevenlabs_model)
+                return v_kokoro, v_edge, v_google, v_gemini, v_elevenlabs, v_gemini_single, v_gemini_multi, cost
             
             tts_engine_input.change(
                 fn=on_tts_change,
-                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, gemini_multi_speaker_input],
-                outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, gemini_tts_col, gemini_single_voice_input, gemini_multi_row, cost_info_html],
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, gemini_multi_speaker_input, elevenlabs_model_input],
+                outputs=[kokoro_voice_input, edge_voice_input, google_tts_row, gemini_tts_col, elevenlabs_tts_col, gemini_single_voice_input, gemini_multi_row, cost_info_html],
             )
             google_voice_type_input.change(
-                fn=lambda e, t, m, gm: update_cost_info(e, t, m, gm),
-                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input],
+                fn=lambda e, t, m, gm, em: update_cost_info(e, t, m, gm, em),
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, elevenlabs_model_input],
                 outputs=cost_info_html,
             )
 
             gemini_pricing_mode_input.change(
-                fn=lambda e, t, m, gm: update_cost_info(e, t, m, gm),
-                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input],
+                fn=lambda e, t, m, gm, em: update_cost_info(e, t, m, gm, em),
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, elevenlabs_model_input],
+                outputs=cost_info_html,
+            )
+
+            elevenlabs_model_input.change(
+                fn=lambda e, t, m, gm, em: update_cost_info(e, t, m, gm, em),
+                inputs=[tts_engine_input, google_voice_type_input, video_meta_state, gemini_pricing_mode_input, elevenlabs_model_input],
                 outputs=cost_info_html,
             )
 
@@ -201,12 +234,12 @@ def build_ui():
 
             url_input.change(
                 fn=on_input_change,
-                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input],
+                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input, elevenlabs_model_input],
                 outputs=[video_meta_state, cost_info_html],
             )
             video_upload_input.change(
                 fn=on_input_change,
-                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input],
+                inputs=[url_input, video_upload_input, tts_engine_input, google_voice_type_input, gemini_pricing_mode_input, elevenlabs_model_input],
                 outputs=[video_meta_state, cost_info_html],
             )
 
@@ -245,6 +278,8 @@ def build_ui():
                 gemini_speaker1_voice_input,
                 gemini_speaker2_name_input,
                 gemini_speaker2_voice_input,
+                elevenlabs_voice_input,
+                elevenlabs_model_input,
             ],
             outputs=[video_output, log_output],
         )

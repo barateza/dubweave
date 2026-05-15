@@ -2,7 +2,7 @@ import os
 import shutil
 import platform
 from pathlib import Path
-from src.config import __version__, WHISPER_MODEL, GOOGLE_TTS_API_KEY, OPENROUTER_API_KEY, ROOT_DIR
+from src.config import __version__, WHISPER_MODEL, GOOGLE_TTS_API_KEY, ELEVENLABS_API_KEY, OPENROUTER_API_KEY, ROOT_DIR
 from src.utils.security import redact
 
 def validate_environment() -> list[str]:
@@ -86,6 +86,8 @@ def log_startup_info() -> None:
     tts_engines = "Kokoro, XTTS v2"
     if GOOGLE_TTS_API_KEY:
         tts_engines += ", Google Cloud TTS"
+    if ELEVENLABS_API_KEY:
+        tts_engines += ", ElevenLabs TTS"
     print(f"[startup] TTS engines available: {tts_engines}")
     if OPENROUTER_API_KEY:
         print(f"[startup] OpenRouter: configured ({redact(OPENROUTER_API_KEY)})")

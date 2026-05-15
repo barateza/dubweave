@@ -22,6 +22,7 @@ OPENROUTER_FLASH_LITE_INPUT_USD_PER_MILLION = 0.075
 OPENROUTER_FLASH_LITE_OUTPUT_USD_PER_MILLION = 0.30
 
 GEMINI_TTS_AUDIO_TOKENS_PER_SECOND = 25.0
+ELEVENLABS_USD_PER_1K_CHARS = 0.30
 
 GEMINI_TTS_PRICING = {
     "standard": {
@@ -75,6 +76,15 @@ def estimate_google_tts_cost(duration_seconds: float, voice_type: str) -> float:
 
 def estimate_audio_tokens_for_duration(duration_seconds: float, tokens_per_second: float = GEMINI_TTS_AUDIO_TOKENS_PER_SECOND) -> float:
     return max(0.0, duration_seconds) * tokens_per_second
+
+
+
+def estimate_elevenlabs_tts_cost(duration_seconds: float, usd_per_1k_chars: float = ELEVENLABS_USD_PER_1K_CHARS) -> float:
+    """Estimate ElevenLabs cost from generated text characters."""
+    if duration_seconds <= 0:
+        return 0.0
+    est_chars, _ = estimate_text_from_duration(duration_seconds)
+    return (est_chars / 1000.0) * usd_per_1k_chars
 
 
 
