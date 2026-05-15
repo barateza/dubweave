@@ -13,9 +13,10 @@ from src.config import (
     GEMINI_TTS_MULTI_SPEAKER, GEMINI_TTS_SPEAKER_ASSIGNMENT,
     GEMINI_TTS_SPEAKER1_NAME, GEMINI_TTS_SPEAKER1_VOICE,
     GEMINI_TTS_SPEAKER2_NAME, GEMINI_TTS_SPEAKER2_VOICE,
+    ELEVENLABS_API_KEY, ELEVENLABS_TTS_MODEL_ID, ELEVENLABS_TTS_VOICE_ID,
 )
 from src.utils.helpers import log
-from src.utils.security import validate_openrouter_key, validate_google_tts_key, validate_gemini_tts_key
+from src.utils.security import validate_openrouter_key, validate_google_tts_key, validate_gemini_tts_key, validate_elevenlabs_key
 from src.utils.system import release_gpu_memory
 from src.utils.project import (
     project_dir, save_project_stage, load_project_stage, 
@@ -30,7 +31,7 @@ from src.core.transcribe import transcribe_audio
 from src.core.synthesis import (
     apply_timing_budget, get_cps_for_voice, synthesize_segments_kokoro,
     synthesize_segments_google_tts, synthesize_segments_edge_tts,
-    synthesize_segments, assemble_dubbed_video
+    synthesize_segments_elevenlabs_tts, synthesize_segments, assemble_dubbed_video
 )
 from src.core.gemini_tts import synthesize_segments_gemini_tts
 
@@ -66,6 +67,8 @@ def run_pipeline(
     gemini_speaker1_voice: str = GEMINI_TTS_SPEAKER1_VOICE,
     gemini_speaker2_name: str = GEMINI_TTS_SPEAKER2_NAME,
     gemini_speaker2_voice: str = GEMINI_TTS_SPEAKER2_VOICE,
+    elevenlabs_voice_id: str = ELEVENLABS_TTS_VOICE_ID,
+    elevenlabs_model_id: str = ELEVENLABS_TTS_MODEL_ID,
     progress=gr.Progress(),
 ):
     logs = []
@@ -114,6 +117,14 @@ def run_pipeline(
             if not ok: raise PipelineError("Validation", f"Gemini key invalid: {msg}")
             log("   ✅ Gemini key valid", logs); yield None, "\n".join(logs)
 
+        if tts_engine == "ElevenLabs TTS":
+            if not ELEVENLABS_API_KEY:
+                raise PipelineError("Validation", "ELEVENLABS_API_KEY missing.")
+            logs = log("🔑 Validating ElevenLabs API key…", logs); yield None, "\n".join(logs)
+            ok, msg = validate_elevenlabs_key(ELEVENLABS_API_KEY)
+            if not ok: raise PipelineError("Validation", f"ElevenLabs key invalid: {msg}")
+            log("   ✅ ElevenLabs key valid", logs); yield None, "\n".join(logs)
+
         # ── Download / Ingest ─────────────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
             progress(0.05, desc="Downloading/Ingesting…")
@@ -155,7 +166,11 @@ def run_pipeline(
                     else (
                         google_tts_voice_name
                         if tts_engine.startswith("Google")
-                        else (gemini_single_voice if tts_engine.startswith("Gemini") else "default")
+                        else (
+                            gemini_single_voice
+                            if tts_engine.startswith("Gemini")
+                            else (elevenlabs_voice_id if tts_engine.startswith("ElevenLabs") else "default")
+                        )
                     )
                 )
             )
@@ -195,6 +210,15 @@ def run_pipeline(
                     speaker2_name=gemini_speaker2_name,
                     speaker2_voice=gemini_speaker2_voice,
                     assignment_mode=gemini_speaker_assignment,
+                )
+            elif tts_engine == "ElevenLabs TTS":
+                timed_clips, logs = synthesize_segments_elevenlabs_tts(
+                    utterances,
+                    job_dir,
+                    logs,
+                    api_key=ELEVENLABS_API_KEY,
+                    voice_id=elevenlabs_voice_id,
+                    model_id=elevenlabs_model_id,
                 )
             else:
                 timed_clips, logs = synthesize_segments(utterances, audio_path, job_dir, logs, speaker_wav=speaker_wav_path)

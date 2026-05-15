@@ -26,7 +26,7 @@ Any URL or local file upload
     ↓  NLLB-200 / OpenRouter    → translates EN→PT-BR (local or LLM)
     ↓  PT-BR Norm               → 36 rules: pronouns, gerunds, Brazilian vocab
     ↓  Timing Budget Pass       → predicts overflow, truncates or rephrases
-    ↓  Kokoro / XTTS / Google   → synthesizes PT-BR speech (fast, clone, or cloud)
+    ↓  Kokoro / XTTS / Google / ElevenLabs   → synthesizes PT-BR speech (fast, clone, or cloud)
     ↓  FFmpeg + numpy buffer    → time-aligns, peak-normalizes, muxes with video
     ↓  Output MP4 + SRT         → dubbed video + optional subtitle track
 ```
@@ -83,6 +83,9 @@ Dubweave reads configuration from a `.env` file in the project root. A default `
 | `GEMINI_TTS_PRICING_MODE` | `auto` | Estimator mode: `auto` picks cheapest between standard and batch and shows one final price. |
 | `GEMINI_TTS_MULTI_SPEAKER` | `false` | Enables explicit two-speaker synthesis controls in the UI. |
 | `GEMINI_TTS_SPEAKER_ASSIGNMENT` | `alternate` | Multi-speaker assignment strategy (`alternate` or `prefix`). |
+| `ELEVENLABS_API_KEY` | _(empty)_ | Optional ElevenLabs TTS integration. Engine appears in UI only when key is set. |
+| `ELEVENLABS_TTS_MODEL_ID` | `eleven_multilingual_v2` | ElevenLabs model ID used for synthesis requests. |
+| `ELEVENLABS_TTS_VOICE_ID` | _(empty)_ | Default ElevenLabs voice ID (overridable in UI dropdown populated from your account). |
 | `GRADIO_SERVER_PORT` | `7860` | Web UI port. Change to `8000`, `8080`, etc. to avoid conflicts |
 | `GRADIO_SERVER_NAME` | `0.0.0.0` | Server host. `0.0.0.0` = network accessible, `127.0.0.1` = localhost only |
 | `GRADIO_SHARE` | `false` | Enable public Gradio.live tunnel. Set to `true` for temporary sharing. |
@@ -140,6 +143,10 @@ If you have a valid **Google Cloud TTS API Key**, Dubweave supports 40+ high-qua
 If you provide **GEMINI_TTS_API_KEY**, Dubweave enables **Gemini 3.1 Flash TTS Preview** as an additional synthesis engine with expressive prompt control and optional two-speaker output. The UI includes explicit speaker names, per-speaker voice selection, and assignment strategy (`alternate` by segment or `prefix` parsing using `SpeakerName: text`).
 
 The estimator now supports Gemini token pricing and always shows one final synthesis estimate. In `auto` mode, Dubweave computes both standard and batch estimates and shows the cheaper value. Gemini audio output estimates use 25 audio tokens per second, matching the published pricing conversion.
+
+### ElevenLabs TTS (Optional Cloud Engine)
+
+If you provide **ELEVENLABS_API_KEY**, Dubweave enables **ElevenLabs TTS** as an additional synthesis engine. The UI loads your account voices into a dropdown and uses a configurable model ID (`ELEVENLABS_TTS_MODEL_ID`). Current scope is single-speaker synthesis.
 
 ### Project Management & Pipeline Resume
 

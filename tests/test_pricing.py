@@ -1,5 +1,6 @@
 from src.core.pricing import (
     estimate_audio_tokens_for_duration,
+    estimate_elevenlabs_tts_cost,
     estimate_gemini_tts_cost_for_mode,
     estimate_google_tts_cost,
     estimate_openrouter_translation_cost,
@@ -32,3 +33,13 @@ def test_openrouter_flash_lite_uses_lite_rates():
     regular = estimate_openrouter_translation_cost(120.0, "google/gemini-2.0-flash-001")
     lite = estimate_openrouter_translation_cost(120.0, "google/gemini-2.0-flash-lite-001")
     assert lite < regular
+
+
+def test_elevenlabs_cost_increases_with_duration():
+    short = estimate_elevenlabs_tts_cost(60.0)
+    long = estimate_elevenlabs_tts_cost(600.0)
+    assert long > short
+
+
+def test_elevenlabs_cost_is_zero_for_negative_duration():
+    assert estimate_elevenlabs_tts_cost(-5.0) == 0.0

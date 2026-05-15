@@ -8,7 +8,8 @@ from typing import Any
 from src.config import (
     KOKORO_LANG, KOKORO_VOICE, KOKORO_SPEED,
     GOOGLE_TTS_API_KEY, GOOGLE_TTS_LANGUAGE_CODE, GOOGLE_TTS_VOICE_TYPE, GOOGLE_TTS_VOICE_NAME,
-    EDGE_TTS_VOICE_NAME, XTTS_MODEL, TARGET_LANG, OUTPUT_DIR, OPENROUTER_MODEL, OPENROUTER_BASE
+    EDGE_TTS_VOICE_NAME, XTTS_MODEL, TARGET_LANG, OUTPUT_DIR, OPENROUTER_MODEL, OPENROUTER_BASE,
+    ELEVENLABS_TTS_MODEL_ID, ELEVENLABS_TTS_VOICE_ID
 )
 from src.utils.helpers import log, retry_with_backoff
 from src.core.translate import PipelineError
@@ -208,6 +209,73 @@ def synthesize_segments_edge_tts(segments: list, job_dir: Path, logs: list, voic
     with ThreadPoolExecutor(max_workers=16) as executor:
         futures = {executor.submit(_synthesize_one, i, seg): i for i, seg in enumerate(segments)}
         for f in as_completed(futures): results[futures[f]] = f.result()
+    for msg in errors: log(msg, logs)
+    return results, logs
+
+# ── ElevenLabs TTS ────────────────────────────────────────────────────────────
+
+def synthesize_segments_elevenlabs_tts(
+    segments: list,
+    job_dir: Path,
+    logs: list,
+    api_key: str,
+    voice_id: str = ELEVENLABS_TTS_VOICE_ID,
+    model_id: str = ELEVENLABS_TTS_MODEL_ID,
+):
+    import urllib.request
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    api_key = api_key.strip()
+    voice_id = voice_id.strip()
+    model_id = model_id.strip() or ELEVENLABS_TTS_MODEL_ID
+    if not api_key:
+        raise PipelineError("Synthesize", "ELEVENLABS_API_KEY missing.")
+    if not voice_id:
+        raise PipelineError("Synthesize", "ElevenLabs voice is required.")
+
+    log(f"🔊 ElevenLabs TTS ready (voice={voice_id}, model={model_id})", logs)
+    seg_dir = job_dir / "segments"; seg_dir.mkdir(exist_ok=True)
+    segments = [s for s in segments if s.get("text", "").strip()]
+    results, errors = [None] * len(segments), []
+
+    def _synthesize_one(idx, seg):
+        out_raw, out_clip = seg_dir / f"seg_{idx:04d}_raw.wav", seg_dir / f"seg_{idx:04d}.wav"
+        text = _sanitize_for_tts(seg["text"].strip())
+        payload = json.dumps({
+            "text": text,
+            "model_id": model_id,
+            "output_format": "mp3_44100_128",
+        }).encode()
+        req = urllib.request.Request(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            data=payload,
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            method="POST",
+        )
+        try:
+            mp3_bytes = retry_with_backoff(lambda: urllib.request.urlopen(req, timeout=45).read())
+            subprocess.run(["ffmpeg", "-y", "-i", "pipe:0", "-ar", "44100", "-ac", "1", str(out_raw)], input=mp3_bytes, capture_output=True, check=True)
+            orig_dur = seg["end"] - seg["start"]
+            if orig_dur > 0.1:
+                probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(out_raw)], capture_output=True, text=True)
+                synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
+                ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
+                subprocess.run(["ffmpeg", "-y", "-i", str(out_raw), "-filter:a", f"atempo={ratio:.4f}", "-ar", "44100", str(out_clip)], capture_output=True)
+            else:
+                shutil.copy(str(out_raw), str(out_clip))
+        except Exception as exc:
+            errors.append(f"   ⚠️  ElevenLabs TTS failed (segment {idx}): {exc}")
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5", str(out_clip)], capture_output=True)
+        return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = {executor.submit(_synthesize_one, i, seg): i for i, seg in enumerate(segments)}
+        for f in as_completed(futures):
+            results[futures[f]] = f.result()
     for msg in errors: log(msg, logs)
     return results, logs
 
