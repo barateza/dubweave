@@ -297,7 +297,14 @@ def translate_segments(
     if source_code and target_code and source_code == target_code:
         translated_texts = merged_texts
     elif openrouter_key.strip():
-        try: translated_texts, logs = translate_openrouter(merged_texts, openrouter_key.strip(), logs)
+        try:
+            translated_texts, logs = translate_openrouter(
+                merged_texts,
+                openrouter_key.strip(),
+                logs,
+                source_label=source_code,
+                target_label=target_label,
+            )
         except Exception as e:
             primary_error = str(e); log(f"   ⚠️  OpenRouter failed: {primary_error[:120]}", logs)
     if translated_texts is None:

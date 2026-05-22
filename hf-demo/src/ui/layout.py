@@ -156,7 +156,7 @@ def on_input_change(url, upload, engine, g_type, gemini_mode, elevenlabs_model):
 
 
 def _build_demo_ui(env_warnings):
-    with gr.Blocks(title="Dubweave — HF Spaces Demo", css=CSS) as demo:
+    with gr.Blocks(title="Dubweave — HF Spaces Demo") as demo:
         gr.HTML(
             """
             <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -363,7 +363,7 @@ def build_ui():
     if DEMO_MODE:
         return _build_demo_ui(env_warnings)
 
-    with gr.Blocks(title="Dubweave — PT-BR", css=CSS) as demo:
+    with gr.Blocks(title="Dubweave — PT-BR") as demo:
         gr.HTML("""
         <a href="#main-content" class="skip-link">Skip to main content</a>
         <div id="header"><h1>DUBWEAVE</h1><p>youtube → dubbing → português brasileiro</p></div>

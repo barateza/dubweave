@@ -10,7 +10,7 @@ import logging
 import warnings
 
 from src.utils.system import log_startup_info
-from src.ui.layout import build_ui
+from src.ui.layout import CSS, build_ui
 
 # Suppress torch.load pickle warnings from TTS/XTTS internals.
 warnings.filterwarnings("ignore", category=FutureWarning, module="TTS")
@@ -48,5 +48,6 @@ if __name__ == "__main__":
         server_name=os.getenv("GRADIO_SERVER_NAME", "0.0.0.0"),
         server_port=int(os.getenv("GRADIO_SERVER_PORT", "7860")),
         share=os.getenv("GRADIO_SHARE", "false").lower() == "true",
+        css=CSS,
         show_error=True
     )
