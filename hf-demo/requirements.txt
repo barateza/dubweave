@@ -1,0 +1,8 @@
+gradio>=4.44.0
+python-dotenv
+openai-whisper
+edge-tts
+transformers>=4.40.0
+sentencepiece
+torch
+numpy
