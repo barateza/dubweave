@@ -136,10 +136,24 @@ def ingest_local_file(upload_path: str, job_dir: Path, logs: list) -> tuple[Path
         if probe.returncode == 0: duration = float(json.loads(probe.stdout)["format"]["duration"])
     except Exception as e: log(f"⚠️  Could not probe duration: {e}", logs)
 
-    if src.suffix.lower() == ".mp4": shutil.copy2(str(src), str(video_path))
+    codec_name = "unknown"
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "json", str(src)], capture_output=True, text=True)
+        if probe.returncode == 0:
+            data = json.loads(probe.stdout)
+            if "streams" in data and len(data["streams"]) > 0:
+                codec_name = data["streams"][0].get("codec_name", "unknown")
+    except Exception:
+        pass
+
+    if src.suffix.lower() == ".mp4" and codec_name in {"h264", "hevc"}:
+        shutil.copy2(str(src), str(video_path))
+    elif codec_name in {"h264", "hevc", "av1", "vp9"}:
+        log(f"   Demuxing {src.suffix} → mp4 container (stream copy, ultra fast)…", logs)
+        subprocess.run(["ffmpeg", "-y", "-i", str(src), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(video_path)], check=True)
     else:
-        log(f"   Re-encoding {src.suffix} → mp4…", logs)
-        subprocess.run(["ffmpeg", "-y", "-i", str(src), "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(video_path)], check=True)
+        log(f"   Re-encoding {src.suffix} → mp4 (optimized)…", logs)
+        subprocess.run(["ffmpeg", "-y", "-i", str(src), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(video_path)], check=True)
 
     log("   Extracting audio…", logs)
     subprocess.run(["ffmpeg", "-y", "-i", str(video_path), "-vn", "-ar", "44100", "-ac", "2", "-f", "wav", str(audio_path)], check=True)
