@@ -32,7 +32,7 @@ from src.core.translate import (
     group_for_synthesis as _group_for_synthesis,
 )
 from src.core.ingest import validate_video_source, ingest_local_file, download_video
-from src.core.transcribe import transcribe_audio
+from src.core.transcribe import transcribe_audio, format_tqdm
 from src.core.synthesis import (
     apply_timing_budget,
     get_cps_for_voice,
@@ -150,12 +150,38 @@ def run_pipeline(
         # ── Transcribe ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["transcribe"]:
             progress(0.2, desc="Transcribing…")
-            segments, logs, detected_lang = transcribe_audio(
+            logs = log(f"🎙️ Transcribing with Whisper ({model_to_use})…", logs)
+            if input_language_code:
+                logs = log(f"   Using language hint: {input_language_code}", logs)
+            else:
+                logs = log("   Auto-detecting language…", logs)
+            yield None, None, None, "\n".join(logs)
+
+            last_progress = ""
+            segments, detected_lang = None, None
+
+            for event_type, data in transcribe_audio(
                 audio_path,
                 logs,
                 model_name=model_to_use,
                 language=input_language_code,
-            )
+            ):
+                if event_type == "log":
+                    formatted = format_tqdm(data)
+                    if formatted:
+                        if formatted.startswith("   ⏳"):
+                            if last_progress and last_progress in logs:
+                                logs.remove(last_progress)
+                            last_progress = formatted
+                            logs.append(formatted)
+                        else:
+                            logs = log(formatted, logs)
+                        yield None, None, None, "\n".join(logs)
+                elif event_type == "done":
+                    segments, detected_lang = data
+
+            logs = log(f"   Detected language: {detected_lang}", logs)
+            logs = log(f"✅ Transcribed {len(segments)} segments", logs)
             save_project_stage(proj, "transcribe", segments)
             yield None, None, None, "\n".join(logs)
             release_gpu_memory()
