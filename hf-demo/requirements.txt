@@ -1,8 +1,11 @@
-gradio==6.14.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+gradio>=5.16.0
 python-dotenv
 openai-whisper
 edge-tts
 transformers>=4.40.0
 sentencepiece
 torch
+torchaudio
+ffmpeg-python
 numpy

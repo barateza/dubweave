@@ -11,37 +11,12 @@ from src.config import (
     DEFAULT_INPUT_LANGUAGE,
     DEFAULT_OUTPUT_LANGUAGE,
     INPUT_LANGUAGE_OPTIONS,
-    KOKORO_VOICE,
-    GOOGLE_TTS_API_KEY,
-    GOOGLE_TTS_LANGUAGE_CODE,
-    GOOGLE_TTS_VOICE_TYPE,
-    GOOGLE_TTS_VOICE_NAME,
     EDGE_TTS_VOICE_NAME,
     OPENROUTER_API_KEY,
-    GEMINI_TTS_API_KEY,
-    GEMINI_TTS_MODEL,
-    GEMINI_TTS_SINGLE_VOICE,
-    GEMINI_TTS_MULTI_SPEAKER,
-    GEMINI_TTS_SPEAKER_ASSIGNMENT,
-    GEMINI_TTS_SPEAKER1_NAME,
-    GEMINI_TTS_SPEAKER1_VOICE,
-    GEMINI_TTS_SPEAKER2_NAME,
-    GEMINI_TTS_SPEAKER2_VOICE,
-    ELEVENLABS_API_KEY,
-    ELEVENLABS_TTS_MODEL_ID,
-    ELEVENLABS_TTS_VOICE_ID,
-    SUPERTONIC_DEFAULT_LANG,
-    SUPERTONIC_DEFAULT_VOICE,
-    SUPERTONIC_AUTO_DOWNLOAD,
-    SUPERTONIC_ASSETS_DIR,
+    OUTPUT_DIR,
 )
 from src.utils.helpers import log
-from src.utils.security import (
-    validate_openrouter_key,
-    validate_google_tts_key,
-    validate_gemini_tts_key,
-    validate_elevenlabs_key,
-)
+from src.utils.security import validate_openrouter_key
 from src.utils.system import release_gpu_memory
 from src.utils.project import (
     project_dir,
@@ -61,29 +36,21 @@ from src.core.transcribe import transcribe_audio
 from src.core.synthesis import (
     apply_timing_budget,
     get_cps_for_voice,
-    synthesize_segments_kokoro,
-    synthesize_segments_google_tts,
     synthesize_segments_edge_tts,
-    synthesize_segments_elevenlabs_tts,
-    synthesize_segments,
     assemble_dubbed_video,
-)
-from src.core.gemini_tts import synthesize_segments_gemini_tts
-from src.core.supertonic_tts import (
-    ensure_supertonic_assets_or_raise,
-    synthesize_segments_supertonic,
 )
 
 STAGES = ["download", "transcribe", "translate", "synthesize", "assemble"]
 
 
 def lazy_import():
-    global yt_dlp, whisper, torch, TTS
-    import yt_dlp
+    global yt_dlp, whisper, torch
+    try:
+        import yt_dlp
+    except ImportError:
+        yt_dlp = None
     import whisper
     import torch
-    from TTS.api import TTS
-
     return True
 
 
@@ -96,30 +63,29 @@ def run_pipeline(
     cookies_file: str | None,
     project_name: str,
     resume_from: str,
-    tts_engine: str = "XTTS v2 (voice clone)",
-    kokoro_voice: str = KOKORO_VOICE,
-    google_tts_voice_type: str = GOOGLE_TTS_VOICE_TYPE,
-    google_tts_voice_name: str = GOOGLE_TTS_VOICE_NAME,
+    tts_engine: str = "Edge TTS (cloud, no key)",
+    kokoro_voice: str = "",
+    google_tts_voice_type: str = "",
+    google_tts_voice_name: str = "",
     edge_tts_voice: str = EDGE_TTS_VOICE_NAME,
-    supertonic_lang: str = SUPERTONIC_DEFAULT_LANG,
-    supertonic_voice: str = SUPERTONIC_DEFAULT_VOICE,
+    supertonic_lang: str = "",
+    supertonic_voice: str = "",
     gemini_pricing_mode: str = "auto",
-    gemini_single_voice: str = GEMINI_TTS_SINGLE_VOICE,
-    gemini_multi_speaker: bool = GEMINI_TTS_MULTI_SPEAKER,
-    gemini_speaker_assignment: str = GEMINI_TTS_SPEAKER_ASSIGNMENT,
-    gemini_speaker1_name: str = GEMINI_TTS_SPEAKER1_NAME,
-    gemini_speaker1_voice: str = GEMINI_TTS_SPEAKER1_VOICE,
-    gemini_speaker2_name: str = GEMINI_TTS_SPEAKER2_NAME,
-    gemini_speaker2_voice: str = GEMINI_TTS_SPEAKER2_VOICE,
-    elevenlabs_voice_id: str = ELEVENLABS_TTS_VOICE_ID,
-    elevenlabs_model_id: str = ELEVENLABS_TTS_MODEL_ID,
+    gemini_single_voice: str = "",
+    gemini_multi_speaker: bool = False,
+    gemini_speaker_assignment: str = "",
+    gemini_speaker1_name: str = "",
+    gemini_speaker1_voice: str = "",
+    gemini_speaker2_name: str = "",
+    gemini_speaker2_voice: str = "",
+    elevenlabs_voice_id: str = "",
+    elevenlabs_model_id: str = "",
     input_language: str = DEFAULT_INPUT_LANGUAGE,
     output_language: str = DEFAULT_OUTPUT_LANGUAGE,
     openrouter_api_key: str = "",
     progress=gr.Progress(),
 ):
     logs = []
-    openrouter_key = OPENROUTER_API_KEY
     proj = project_name.strip() or "default"
 
     stage_order = {s: i for i, s in enumerate(STAGES)}
@@ -136,14 +102,12 @@ def run_pipeline(
         input_language_code = None
     output_language_value = (output_language or DEFAULT_OUTPUT_LANGUAGE).strip() or DEFAULT_OUTPUT_LANGUAGE
     openrouter_key = openrouter_api_key.strip() or OPENROUTER_API_KEY
-    supertonic_lang = supertonic_lang.strip().lower()
-    supertonic_voice = supertonic_voice.strip().upper()
 
     try:
         lazy_import()
         logs = cleanup_stale_jobs(logs)
         logs = log(f"📁 Project: {proj}  |  Resume from: {resume_from}", logs)
-        yield None, "\n".join(logs)
+        yield None, None, None, "\n".join(logs)
 
         # ── Pre-flight validation ───────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
@@ -154,61 +118,12 @@ def run_pipeline(
 
         if openrouter_key:
             logs = log("🔑 Validating OpenRouter API key…", logs)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
             ok, msg = validate_openrouter_key(openrouter_key)
             if not ok:
                 raise PipelineError("Validation", f"OpenRouter key invalid: {msg}")
             log("   ✅ OpenRouter key valid", logs)
-            yield None, "\n".join(logs)
-
-        if tts_engine == "Google Cloud TTS":
-            if not GOOGLE_TTS_API_KEY:
-                raise PipelineError("Validation", "GOOGLE_TTS_API_KEY missing.")
-            logs = log("🔑 Validating Google TTS API key…", logs)
-            yield None, "\n".join(logs)
-            ok, msg = validate_google_tts_key(GOOGLE_TTS_API_KEY)
-            if not ok:
-                raise PipelineError("Validation", f"Google TTS key invalid: {msg}")
-            log("   ✅ Google TTS key valid", logs)
-            yield None, "\n".join(logs)
-
-        if tts_engine == "Gemini 3.1 Flash TTS Preview":
-            if not GEMINI_TTS_API_KEY:
-                raise PipelineError("Validation", "GEMINI_TTS_API_KEY missing.")
-            logs = log("🔑 Validating Gemini TTS API key…", logs)
-            yield None, "\n".join(logs)
-            ok, msg = validate_gemini_tts_key(GEMINI_TTS_API_KEY)
-            if not ok:
-                raise PipelineError("Validation", f"Gemini key invalid: {msg}")
-            log("   ✅ Gemini key valid", logs)
-            yield None, "\n".join(logs)
-
-        if tts_engine.startswith("Supertonic"):
-            try:
-                import supertonic  # noqa: F401
-            except ImportError:
-                raise PipelineError("Validation", "supertonic is not installed.")
-            try:
-                import onnxruntime  # noqa: F401
-            except ImportError:
-                raise PipelineError("Validation", "onnxruntime is not installed.")
-            if not SUPERTONIC_AUTO_DOWNLOAD and not SUPERTONIC_ASSETS_DIR:
-                raise PipelineError(
-                    "Validation",
-                    "Supertonic assets are missing and SUPERTONIC_AUTO_DOWNLOAD is false. Configure SUPERTONIC_ASSETS_DIR or enable auto-download.",
-                )
-            ensure_supertonic_assets_or_raise()
-
-        if tts_engine == "ElevenLabs TTS":
-            if not ELEVENLABS_API_KEY:
-                raise PipelineError("Validation", "ELEVENLABS_API_KEY missing.")
-            logs = log("🔑 Validating ElevenLabs API key…", logs)
-            yield None, "\n".join(logs)
-            ok, msg = validate_elevenlabs_key(ELEVENLABS_API_KEY)
-            if not ok:
-                raise PipelineError("Validation", f"ElevenLabs key invalid: {msg}")
-            log("   ✅ ElevenLabs key valid", logs)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
 
         # ── Download / Ingest ─────────────────────────────────────────────────
         if resume_idx <= stage_order["download"]:
@@ -224,13 +139,13 @@ def run_pipeline(
             save_project_stage(
                 proj, "download", (video_path, audio_path, title, duration)
             )
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
         else:
             log("⏭️  Skipping download (loaded from project)", logs)
             video_path, audio_path, title, duration = load_project_stage(
                 proj, "download"
             )
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
 
         # ── Transcribe ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["transcribe"]:
@@ -242,18 +157,18 @@ def run_pipeline(
                 language=input_language_code,
             )
             save_project_stage(proj, "transcribe", segments)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
             release_gpu_memory()
         else:
             segments = load_project_stage(proj, "transcribe")
             detected_lang = input_language_code or "unknown"
             log(f"⏭️  Skipping transcription ({len(segments)} segments loaded)", logs)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
 
         # ── Translate ─────────────────────────────────────────────────────────
         if resume_idx <= stage_order["translate"]:
             progress(0.4, desc="Translating…")
-            m_cfg = get_merge_config(tts_engine)
+            m_cfg = get_merge_config("edge")
             translated, logs = translate_segments(
                 segments,
                 logs,
@@ -264,115 +179,34 @@ def run_pipeline(
             )
 
             progress(0.5, desc="Checking timing budget…")
-            active_voice = (
-                kokoro_voice
-                if tts_engine.startswith("Kokoro")
-                else (
-                    edge_tts_voice
-                    if tts_engine.startswith("Edge")
-                    else (
-                        supertonic_voice
-                        if tts_engine.startswith("Supertonic")
-                        else (
-                            google_tts_voice_name
-                            if tts_engine.startswith("Google")
-                            else (
-                                gemini_single_voice
-                                if tts_engine.startswith("Gemini")
-                                else (
-                                    elevenlabs_voice_id
-                                    if tts_engine.startswith("ElevenLabs")
-                                    else "default"
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-            cps = get_cps_for_voice(tts_engine, active_voice)
+            cps = get_cps_for_voice("edge", edge_tts_voice)
             translated, logs = apply_timing_budget(
                 translated, logs, openrouter_key=openrouter_key, cps=cps
             )
 
             save_project_stage(proj, "translate", translated)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
             release_gpu_memory()
         else:
             translated = load_project_stage(proj, "translate")
             log(f"⏭️  Skipping translation ({len(translated)} segments loaded)", logs)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
 
         # ── Synthesize ────────────────────────────────────────────────────────
         if resume_idx <= stage_order["synthesize"]:
             progress(0.55, desc="Synthesizing voice…")
             utterances = _group_for_synthesis(translated)
-            if tts_engine == "Kokoro (fast, PT-BR native)":
-                timed_clips, logs = synthesize_segments_kokoro(
-                    utterances, job_dir, logs, voice=kokoro_voice
-                )
-            elif tts_engine == "Google Cloud TTS":
-                timed_clips, logs = synthesize_segments_google_tts(
-                    utterances,
-                    job_dir,
-                    logs,
-                    api_key=GOOGLE_TTS_API_KEY,
-                    voice_type=google_tts_voice_type,
-                    voice_name=google_tts_voice_name,
-                    language_code=GOOGLE_TTS_LANGUAGE_CODE,
-                )
-            elif tts_engine == "Edge TTS (cloud, no key)":
-                timed_clips, logs = synthesize_segments_edge_tts(
-                    utterances, job_dir, logs, voice=edge_tts_voice
-                )
-            elif tts_engine.startswith("Supertonic"):
-                timed_clips, logs = synthesize_segments_supertonic(
-                    utterances,
-                    job_dir,
-                    logs,
-                    voice=supertonic_voice,
-                    lang=supertonic_lang,
-                )
-            elif tts_engine == "Gemini 3.1 Flash TTS Preview":
-                if gemini_pricing_mode == "auto":
-                    log(
-                        "   ℹ️  Gemini pricing mode auto selects cheapest estimate in UI; runtime uses real-time endpoint.",
-                        logs,
-                    )
-                timed_clips, logs = synthesize_segments_gemini_tts(
-                    utterances,
-                    job_dir,
-                    logs,
-                    api_key=GEMINI_TTS_API_KEY,
-                    model=GEMINI_TTS_MODEL,
-                    single_voice=gemini_single_voice,
-                    multi_speaker=gemini_multi_speaker,
-                    speaker1_name=gemini_speaker1_name,
-                    speaker1_voice=gemini_speaker1_voice,
-                    speaker2_name=gemini_speaker2_name,
-                    speaker2_voice=gemini_speaker2_voice,
-                    assignment_mode=gemini_speaker_assignment,
-                )
-            elif tts_engine == "ElevenLabs TTS":
-                timed_clips, logs = synthesize_segments_elevenlabs_tts(
-                    utterances,
-                    job_dir,
-                    logs,
-                    api_key=ELEVENLABS_API_KEY,
-                    voice_id=elevenlabs_voice_id,
-                    model_id=elevenlabs_model_id,
-                )
-            else:
-                timed_clips, logs = synthesize_segments(
-                    utterances, audio_path, job_dir, logs, speaker_wav=speaker_wav_path
-                )
+            timed_clips, logs = synthesize_segments_edge_tts(
+                utterances, job_dir, logs, voice=edge_tts_voice
+            )
 
             save_project_stage(proj, "synthesize", timed_clips)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
             release_gpu_memory()
         else:
             timed_clips = load_project_stage(proj, "synthesize")
             log(f"⏭️  Skipping synthesis ({len(timed_clips)} clips loaded)", logs)
-            yield None, "\n".join(logs)
+            yield None, None, None, "\n".join(logs)
 
         # ── Assemble ──────────────────────────────────────────────────────────
         progress(0.85, desc="Assembling video…")
@@ -386,22 +220,35 @@ def run_pipeline(
         )
         save_project_stage(proj, "assemble", output_path)
 
+        # Generate subtitles SRT file
+        srt_path = None
         try:
-            _, srt_msg = generate_srt_for_project(proj)
+            srt_gen_path, srt_msg = generate_srt_for_project(proj)
+            if srt_gen_path and Path(srt_gen_path).exists():
+                srt_path = srt_gen_path
             log(f"📄 {srt_msg}", logs)
         except Exception as e:
             log(f"⚠️  SRT failed: {e}", logs)
 
+        # Copy outputs to clean static filenames in OUTPUT_DIR for download
+        final_video_dest = OUTPUT_DIR / "dubbed_video.mp4"
+        shutil.copy2(str(output_path), str(final_video_dest))
+
+        final_srt_dest = OUTPUT_DIR / "subtitles.srt"
+        if srt_path and Path(srt_path).exists():
+            shutil.copy2(str(srt_path), str(final_srt_dest))
+        else:
+            final_srt_dest = None
+
         progress(1.0, desc="Done!")
-        yield output_path, "\n".join(logs)
+        yield str(output_path), str(final_video_dest), str(final_srt_dest) if final_srt_dest else None, "\n".join(logs)
 
     except PipelineError as e:
         log(f"❌ [{e.stage}] {e.message}", logs)
-        yield None, "\n".join(logs)
+        yield None, None, None, "\n".join(logs)
     except Exception as e:
         import traceback
-
         log(f"❌ Unexpected error: {e}\n{traceback.format_exc()}", logs)
-        yield None, "\n".join(logs)
+        yield None, None, None, "\n".join(logs)
     finally:
         shutil.rmtree(str(job_dir), ignore_errors=True)

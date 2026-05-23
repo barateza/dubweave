@@ -6,21 +6,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 from src.config import (
-    KOKORO_LANG,
-    KOKORO_VOICE,
-    KOKORO_SPEED,
-    GOOGLE_TTS_API_KEY,
-    GOOGLE_TTS_LANGUAGE_CODE,
-    GOOGLE_TTS_VOICE_TYPE,
-    GOOGLE_TTS_VOICE_NAME,
     EDGE_TTS_VOICE_NAME,
-    XTTS_MODEL,
-    TARGET_LANG,
     OUTPUT_DIR,
     OPENROUTER_MODEL,
     OPENROUTER_BASE,
-    ELEVENLABS_TTS_MODEL_ID,
-    ELEVENLABS_TTS_VOICE_ID,
 )
 from src.utils.helpers import log, retry_with_backoff
 from src.core.translate import PipelineError
@@ -28,22 +17,9 @@ from src.core.translate import PipelineError
 # ── Timing & Budget ──────────────────────────────────────────────────────────
 
 VOICE_CALIBRATION: dict[str, float] = {
-    "pf_dora": 13.3,
-    "pm_alex": 13.1,
-    "pm_santa": 12.9,
     "pt-BR-FranciscaNeural": 11.1,
     "pt-BR-AntonioNeural": 11.1,
     "pt-BR-ThalitaNeural": 13.1,
-    "M1": 16.0,
-    "M2": 16.0,
-    "M3": 16.0,
-    "M4": 16.0,
-    "M5": 16.0,
-    "F1": 16.0,
-    "F2": 16.0,
-    "F3": 16.0,
-    "F4": 16.0,
-    "F5": 16.0,
     "default": 15.1,
 }
 
@@ -60,8 +36,6 @@ def _estimate_synth_duration(text: str, cps: float = 15.1) -> float:
 
 
 def get_cps_for_voice(engine: str, voice: str) -> float:
-    if engine.startswith("Supertonic"):
-        return VOICE_CALIBRATION.get(voice, 16.0)
     return VOICE_CALIBRATION.get(voice, VOICE_CALIBRATION["default"])
 
 
@@ -79,14 +53,14 @@ def _trim_to_budget(
     try:
         import urllib.request
 
-        prompt = f"Rephrase this Brazilian Portuguese text to express the same meaning in at most {char_budget} characters. Output ONLY the rephrased text.\n\n{text}"
+        prompt = f"Rephrase this text to express the same meaning in at most {char_budget} characters. Output ONLY the rephrased text.\n\n{text}"
         payload = json.dumps(
             {
                 "model": OPENROUTER_MODEL,
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a Brazilian Portuguese editor. Shorten text while preserving meaning.",
+                        "content": "You are a text editor. Shorten text while preserving meaning.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -180,197 +154,6 @@ def _sanitize_for_tts(text: str) -> str:
     text = re.sub(r"[-\u2013\u2014]{2,}", ",", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text if text else "\u2026"
-
-
-# ── Kokoro ───────────────────────────────────────────────────────────────────
-
-
-def synthesize_segments_kokoro(
-    segments: list,
-    job_dir: Path,
-    logs: list,
-    voice: str = KOKORO_VOICE,
-    speed: float = KOKORO_SPEED,
-):
-    import numpy as np
-    import soundfile as sf
-    from kokoro import KPipeline
-
-    log(f"🔊 Loading Kokoro-82M (lang=pt-br, voice={voice})…", logs)
-    pipeline = KPipeline(lang_code=KOKORO_LANG, repo_id="hexgrad/Kokoro-82M")
-    segments = [s for s in segments if s.get("text", "").strip()]
-    seg_dir = job_dir / "segments"
-    seg_dir.mkdir(exist_ok=True)
-    timed_clips = []
-    for i, seg in enumerate(segments):
-        out_raw, out_clip = (
-            seg_dir / f"seg_{i:04d}_raw.wav",
-            seg_dir / f"seg_{i:04d}.wav",
-        )
-        text = _sanitize_for_tts(seg["text"].strip())
-        chunks = [audio for _, _, audio in pipeline(text, voice=voice, speed=speed)]
-        if not chunks:
-            continue
-        audio_np = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
-        sf.write(str(out_raw), audio_np, 24000)
-        orig_dur = seg["end"] - seg["start"]
-        if orig_dur > 0.1:
-            probe = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "json",
-                    str(out_raw),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-            ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(out_raw),
-                    "-filter:a",
-                    f"atempo={ratio:.4f}",
-                    "-ar",
-                    "44100",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
-        else:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", str(out_raw), "-ar", "44100", str(out_clip)],
-                capture_output=True,
-            )
-        timed_clips.append(
-            {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
-        )
-        if i % 10 == 0:
-            log(f"   Segment {i+1}/{len(segments)}…", logs)
-    return timed_clips, logs
-
-
-# ── Google Cloud TTS ─────────────────────────────────────────────────────────
-
-
-def synthesize_segments_google_tts(
-    segments: list,
-    job_dir: Path,
-    logs: list,
-    api_key: str,
-    voice_type: str = "Neural2",
-    voice_name: str = "pt-BR-Neural2-A",
-    language_code: str = "pt-BR",
-):
-    import base64
-    import urllib.request
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    log(f"🔊 Loading Google Cloud TTS ({voice_type}: {voice_name})…", logs)
-    seg_dir = job_dir / "segments"
-    seg_dir.mkdir(exist_ok=True)
-    segments = [s for s in segments if s.get("text", "").strip()]
-    results, errors = [None] * len(segments), []
-
-    def _synthesize_one(idx, seg):
-        out_raw, out_clip = (
-            seg_dir / f"seg_{idx:04d}_raw.wav",
-            seg_dir / f"seg_{idx:04d}.wav",
-        )
-        text = _sanitize_for_tts(seg["text"].strip())
-        payload = json.dumps(
-            {
-                "input": {"text": text},
-                "voice": {"languageCode": language_code, "name": voice_name},
-                "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": 24000},
-            }
-        ).encode()
-        req = urllib.request.Request(
-            "https://texttospeech.googleapis.com/v1/text:synthesize",
-            data=payload,
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            method="POST",
-        )
-        try:
-            data = retry_with_backoff(
-                lambda: json.loads(urllib.request.urlopen(req, timeout=30).read())
-            )
-            out_raw.write_bytes(base64.b64decode(data["audioContent"]))
-            orig_dur = seg["end"] - seg["start"]
-            if orig_dur > 0.1:
-                probe = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "error",
-                        "-show_entries",
-                        "format=duration",
-                        "-of",
-                        "json",
-                        str(out_raw),
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-                ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(out_raw),
-                        "-filter:a",
-                        f"atempo={ratio:.4f}",
-                        "-ar",
-                        "44100",
-                        str(out_clip),
-                    ],
-                    capture_output=True,
-                )
-            else:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", str(out_raw), "-ar", "44100", str(out_clip)],
-                    capture_output=True,
-                )
-        except Exception as exc:
-            errors.append(f"   ⚠️  Google TTS failed (segment {idx}): {exc}")
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "anullsrc=r=44100:cl=stereo",
-                    "-t",
-                    "0.5",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
-        return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
-
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        future_to_idx = {
-            executor.submit(_synthesize_one, i, seg): i
-            for i, seg in enumerate(segments)
-        }
-        for future in as_completed(future_to_idx):
-            results[future_to_idx[future]] = future.result()
-            if sum(1 for r in results if r) % 10 == 0:
-                log(f"   Segment synthesized…", logs)
-    for msg in errors:
-        log(msg, logs)
-    return results, logs
 
 
 # ── Edge TTS ─────────────────────────────────────────────────────────────────
@@ -495,275 +278,6 @@ def synthesize_segments_edge_tts(
     for msg in errors:
         log(msg, logs)
     return results, logs
-
-
-# ── ElevenLabs TTS ────────────────────────────────────────────────────────────
-
-
-def synthesize_segments_elevenlabs_tts(
-    segments: list,
-    job_dir: Path,
-    logs: list,
-    api_key: str,
-    voice_id: str = ELEVENLABS_TTS_VOICE_ID,
-    model_id: str = ELEVENLABS_TTS_MODEL_ID,
-):
-    import urllib.request
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    max_workers = 8
-
-    api_key = api_key.strip()
-    voice_id = voice_id.strip()
-    model_id = model_id.strip() or ELEVENLABS_TTS_MODEL_ID
-    if not api_key:
-        raise PipelineError("Synthesize", "ELEVENLABS_API_KEY missing.")
-    if not voice_id:
-        raise PipelineError("Synthesize", "ElevenLabs voice is required.")
-
-    log(f"🔊 ElevenLabs TTS ready (voice={voice_id}, model={model_id})", logs)
-    seg_dir = job_dir / "segments"
-    seg_dir.mkdir(exist_ok=True)
-    segments = [s for s in segments if s.get("text", "").strip()]
-    results, errors = [None] * len(segments), []
-
-    def _synthesize_one(idx, seg):
-        out_raw, out_clip = (
-            seg_dir / f"seg_{idx:04d}_raw.wav",
-            seg_dir / f"seg_{idx:04d}.wav",
-        )
-        text = _sanitize_for_tts(seg["text"].strip())
-        payload = json.dumps(
-            {
-                "text": text,
-                "model_id": model_id,
-                "output_format": "mp3_44100_128",
-            }
-        ).encode()
-        req = urllib.request.Request(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            data=payload,
-            headers={
-                "xi-api-key": api_key,
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
-            },
-            method="POST",
-        )
-        try:
-            mp3_bytes = retry_with_backoff(
-                lambda: urllib.request.urlopen(req, timeout=45).read()
-            )
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    "pipe:0",
-                    "-ar",
-                    "44100",
-                    "-ac",
-                    "1",
-                    str(out_raw),
-                ],
-                input=mp3_bytes,
-                capture_output=True,
-                check=True,
-            )
-            orig_dur = seg["end"] - seg["start"]
-            if orig_dur > 0.1:
-                probe = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "error",
-                        "-show_entries",
-                        "format=duration",
-                        "-of",
-                        "json",
-                        str(out_raw),
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-                ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(out_raw),
-                        "-filter:a",
-                        f"atempo={ratio:.4f}",
-                        "-ar",
-                        "44100",
-                        str(out_clip),
-                    ],
-                    capture_output=True,
-                    check=True,
-                )
-            else:
-                shutil.copy(str(out_raw), str(out_clip))
-        except subprocess.CalledProcessError as exc:
-            stderr = (
-                exc.stderr.decode(errors="ignore")
-                if isinstance(exc.stderr, bytes)
-                else str(exc.stderr or "")
-            ).strip()
-            errors.append(
-                f"   ⚠️  ElevenLabs ffmpeg conversion failed (segment {idx}): {stderr or exc}"
-            )
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "anullsrc=r=44100:cl=mono",
-                    "-t",
-                    "0.5",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
-        except Exception as exc:
-            errors.append(f"   ⚠️  ElevenLabs TTS failed (segment {idx}): {exc}")
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "anullsrc=r=44100:cl=mono",
-                    "-t",
-                    "0.5",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
-        return {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_synthesize_one, i, seg): i
-            for i, seg in enumerate(segments)
-        }
-        for f in as_completed(futures):
-            results[futures[f]] = f.result()
-    for msg in errors:
-        log(msg, logs)
-    return results, logs
-
-
-# ── XTTS v2 ──────────────────────────────────────────────────────────────────
-
-
-def synthesize_segments(
-    segments: list,
-    audio_orig: Path,
-    job_dir: Path,
-    logs: list,
-    speaker_wav: str | None = None,
-):
-    import torch
-    from TTS.api import TTS
-
-    log("🔊 Loading XTTS v2…", logs)
-    tts = TTS(XTTS_MODEL).to("cuda" if torch.cuda.is_available() else "cpu")
-    ref_wav = speaker_wav or str(job_dir / "ref_30s.wav")
-    if not speaker_wav:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(audio_orig),
-                "-t",
-                "30",
-                "-ar",
-                "22050",
-                "-ac",
-                "1",
-                ref_wav,
-            ],
-            check=True,
-        )
-    seg_dir = job_dir / "segments"
-    seg_dir.mkdir(exist_ok=True)
-    segments = [s for s in segments if s.get("text", "").strip()]
-    timed_clips = []
-    for i, seg in enumerate(segments):
-        out_raw, out_clip = (
-            seg_dir / f"seg_{i:04d}_raw.wav",
-            seg_dir / f"seg_{i:04d}.wav",
-        )
-        text = _sanitize_for_tts(seg["text"].strip())
-        try:
-            tts.tts_to_file(
-                text=text,
-                speaker_wav=ref_wav,
-                language=TARGET_LANG,
-                file_path=str(out_raw),
-            )
-        except Exception as e:
-            log(f"   ⚠️  XTTS failed: {e}", logs)
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "anullsrc=r=44100:cl=stereo",
-                    "-t",
-                    "0.5",
-                    str(out_raw),
-                ],
-                capture_output=True,
-            )
-        orig_dur = seg["end"] - seg["start"]
-        if orig_dur > 0.1:
-            probe = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "json",
-                    str(out_raw),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            synth_dur = float(json.loads(probe.stdout)["format"]["duration"])
-            ratio = _clamp_atempo_ratio(synth_dur / orig_dur)
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(out_raw),
-                    "-filter:a",
-                    f"atempo={ratio:.4f}",
-                    "-ar",
-                    "44100",
-                    str(out_clip),
-                ],
-                capture_output=True,
-            )
-        else:
-            shutil.copy(str(out_raw), str(out_clip))
-        timed_clips.append(
-            {"path": str(out_clip), "start": seg["start"], "end": seg["end"]}
-        )
-        if i % 10 == 0:
-            log(f"   Segment {i+1} done…", logs)
-    return timed_clips, logs
 
 
 # ── Assembly ─────────────────────────────────────────────────────────────────

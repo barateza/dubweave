@@ -6,6 +6,17 @@
 
 ---
 
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-xl-dark.svg)](https://huggingface.co/spaces/barateza/dubweave-demo)
+
+### ☁️ Hugging Face Spaces Demo
+Don't have an NVIDIA GPU or want a quick test? Run a lightweight, fully optimized, CPU-safe **Dubweave Demo** instantly in your browser on Hugging Face Spaces!
+* **Zero GPU needed:** Runs entirely on free CPU instances using Neural Edge TTS.
+* **Smart Offline Translation:** English → Portuguese (BR) runs completely free and locally using a lightweight Helsinki-NLP translation model (no API key required).
+* **Dual Outputs:** Download your dubbed video (`dubbed_video.mp4`) and translated subtitles (`subtitles.srt`) instantly as separate files.
+* **Limitations:** Restricted to 50MB file uploads and 3 minutes video duration to keep the shared CPU Space responsive for everyone.
+
+---
+
 ## Why I built this
 
 My wife Aline speaks Portuguese, and I kept coming across English content — essays, documentaries, interviews — that I wanted to share with her but couldn't because of the language barrier. Subtitles help, but watching dubbed video together is a completely different experience: she can follow without reading, and we can just enjoy it side by side.

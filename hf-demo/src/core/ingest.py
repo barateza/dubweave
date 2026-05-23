@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
-from src.config import WORK_DIR
+from src.config import WORK_DIR, DEMO_MODE, MAX_VIDEO_DURATION_S, MAX_FILE_SIZE_MB
 from src.utils.helpers import log
 from src.core.translate import PipelineError
 
@@ -103,8 +103,8 @@ def get_video_metadata(url: str, upload_path: str | None) -> dict:
         return meta
 
     if url and url.strip():
-        import yt_dlp as yt
         try:
+            import yt_dlp as yt
             with yt.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
                 info = ydl.extract_info(url, download=False)
                 meta["title"] = info.get("title", "YouTube Video")
@@ -128,6 +128,15 @@ def ingest_local_file(upload_path: str, job_dir: Path, logs: list) -> tuple[Path
     if src.suffix.lower() not in _VIDEO_EXTENSIONS:
         raise PipelineError("Ingest", f"Unsupported file type '{src.suffix}'.")
     
+    if DEMO_MODE:
+        file_size_mb = src.stat().st_size / (1024 * 1024)
+        if file_size_mb > MAX_FILE_SIZE_MB:
+            raise PipelineError(
+                "Ingest",
+                f"File size ({file_size_mb:.1f} MB) exceeds the maximum allowed limit for the demo ({MAX_FILE_SIZE_MB} MB). "
+                "Please upload a smaller file."
+            )
+
     video_path = job_dir / "video.mp4"
     audio_path = job_dir / "audio_orig.wav"
     title, duration = src.stem, 0.0
@@ -135,6 +144,13 @@ def ingest_local_file(upload_path: str, job_dir: Path, logs: list) -> tuple[Path
         probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(src)], capture_output=True, text=True)
         if probe.returncode == 0: duration = float(json.loads(probe.stdout)["format"]["duration"])
     except Exception as e: log(f"⚠️  Could not probe duration: {e}", logs)
+
+    if DEMO_MODE and duration > MAX_VIDEO_DURATION_S:
+        raise PipelineError(
+            "Ingest",
+            f"Video duration ({duration:.1f}s) exceeds the maximum allowed limit for the demo ({MAX_VIDEO_DURATION_S}s). "
+            "Please upload a shorter video."
+        )
 
     if src.suffix.lower() == ".mp4": shutil.copy2(str(src), str(video_path))
     else:
@@ -147,7 +163,14 @@ def ingest_local_file(upload_path: str, job_dir: Path, logs: list) -> tuple[Path
     return video_path, audio_path, title, duration, logs
 
 def download_video(url: str, job_dir: Path, logs: list, browser: str = "none", cookies_file: str | None = None):
-    import yt_dlp as yt
+    try:
+        import yt_dlp as yt
+    except ImportError:
+        raise PipelineError(
+            "Ingest",
+            "URL download is not supported on this Hugging Face Space (yt-dlp is not installed). "
+            "Please upload a local video file instead."
+        )
     log("📥 Downloading video with yt-dlp…", logs)
     video_path, audio_path = job_dir / "video.mp4", job_dir / "audio_orig.wav"
 

@@ -9,8 +9,29 @@ import sys
 import logging
 import warnings
 
+# Monkey-patch gradio_client to fix the "TypeError: argument of type 'bool' is not iterable" crash
+# caused by standard Pydantic v2 schemas returning additionalProperties: bool
+try:
+    import gradio_client.utils as client_utils
+    original_get_type = client_utils.get_type
+    def patched_get_type(schema):
+        if isinstance(schema, bool):
+            return "boolean"
+        return original_get_type(schema)
+    client_utils.get_type = patched_get_type
+
+    original_json_schema_to_python_type = getattr(client_utils, "_json_schema_to_python_type", None)
+    if original_json_schema_to_python_type:
+        def patched_json_schema_to_python_type(schema, defs=None):
+            if isinstance(schema, bool):
+                return "bool"
+            return original_json_schema_to_python_type(schema, defs)
+        client_utils._json_schema_to_python_type = patched_json_schema_to_python_type
+except Exception:
+    pass
+
 from src.utils.system import log_startup_info
-from src.ui.layout import CSS, build_ui
+from src.ui.layout import build_ui
 
 # Suppress torch.load pickle warnings from TTS/XTTS internals.
 warnings.filterwarnings("ignore", category=FutureWarning, module="TTS")
@@ -48,6 +69,5 @@ if __name__ == "__main__":
         server_name=os.getenv("GRADIO_SERVER_NAME", "0.0.0.0"),
         server_port=int(os.getenv("GRADIO_SERVER_PORT", "7860")),
         share=os.getenv("GRADIO_SHARE", "false").lower() == "true",
-        css=CSS,
         show_error=True
     )

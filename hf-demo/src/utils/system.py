@@ -6,8 +6,6 @@ from pathlib import Path
 from src.config import (
     __version__,
     WHISPER_MODEL,
-    GOOGLE_TTS_API_KEY,
-    ELEVENLABS_API_KEY,
     OPENROUTER_API_KEY,
     ROOT_DIR,
 )
@@ -18,17 +16,10 @@ def validate_environment(demo_mode: bool = False) -> list[str]:
     """Check required tools at startup; return list of warning strings."""
     warnings_list: list[str] = []
 
-    if not demo_mode and shutil.which("espeak-ng") is None:
-        warnings_list.append(
-            "⚠️  espeak-ng not found — Kokoro TTS will fail. "
-            "Install from: https://github.com/espeak-ng/espeak-ng/releases/download/1.52.0/espeak-ng.msi "
-            "then restart your terminal."
-        )
-
     if shutil.which("ffmpeg") is None:
         warnings_list.append(
             "⚠️  ffmpeg not found — video assembly will fail. "
-            "Run setup.bat to install all dependencies."
+            "Ensure ffmpeg is installed and on your system PATH."
         )
 
     if shutil.which("ffprobe") is None:
@@ -37,62 +28,12 @@ def validate_environment(demo_mode: bool = False) -> list[str]:
             "Ensure ffmpeg is installed (ffprobe is bundled with it)."
         )
 
-    if not demo_mode:
-        try:
-            import onnxruntime  # noqa: F401
-        except ImportError:
-            warnings_list.append(
-                "⚠️  onnxruntime not installed — Supertonic TTS will fail."
-            )
-
-        try:
-            import supertonic  # noqa: F401
-        except ImportError:
-            warnings_list.append(
-                "⚠️  supertonic not installed — Supertonic local TTS is unavailable."
-            )
-
     try:
         import torch
-
-        if not torch.cuda.is_available():
-            if not demo_mode:
-                warnings_list.append(
-                    "⚠️  CUDA not available — GPU acceleration disabled. "
-                    "Ensure NVIDIA drivers are installed and `nvidia-smi` shows your GPU."
-                )
     except ImportError:
         warnings_list.append(
-            "⚠️  PyTorch not installed — GPU acceleration unavailable."
+            "⚠️  PyTorch not installed — GPU/CPU acceleration unavailable."
         )
-
-    if not demo_mode:
-        env_path = ROOT_DIR / ".env"
-        env_example_path = ROOT_DIR / ".env.example"
-        if not env_path.exists():
-            if env_example_path.exists():
-                shutil.copy(str(env_example_path), str(env_path))
-                warnings_list.append(
-                    "ℹ️  .env created from .env.example — review settings before running."
-                )
-            else:
-                warnings_list.append(
-                    "⚠️  .env not found — using built-in defaults. "
-                    "Create a .env file to configure API keys and model choices."
-                )
-
-    if not demo_mode:
-        try:
-            from src.config import SUPERTONIC_ASSETS_DIR
-
-            if SUPERTONIC_ASSETS_DIR:
-                assets_path = Path(SUPERTONIC_ASSETS_DIR)
-                if not assets_path.exists():
-                    warnings_list.append(
-                        f"⚠️  SUPERTONIC_ASSETS_DIR does not exist: {assets_path}. Supertonic auto-download may still work if enabled."
-                    )
-        except Exception:
-            pass
 
     return warnings_list
 
@@ -114,7 +55,7 @@ def release_gpu_memory() -> None:
 
 def log_startup_info() -> None:
     """Print environment diagnostics to stdout at application startup."""
-    print(f"[startup] Dubweave v{__version__} starting")
+    print(f"[startup] Dubweave Demo v{__version__} starting")
     print(
         f"[startup] Python {platform.python_version()} on {platform.system()} {platform.release()}"
     )
@@ -135,23 +76,12 @@ def log_startup_info() -> None:
         print("[startup] PyTorch not installed")
 
     print(f"[startup] Whisper model: {WHISPER_MODEL}")
-    tts_engines = ["Kokoro", "XTTS v2"]
-    try:
-        import supertonic  # noqa: F401
-
-        tts_engines.append("Supertonic")
-    except ImportError:
-        pass
-    if GOOGLE_TTS_API_KEY:
-        tts_engines.append("Google Cloud TTS")
-    if ELEVENLABS_API_KEY:
-        tts_engines.append("ElevenLabs TTS")
-    print(f"[startup] TTS engines available: {', '.join(tts_engines)}")
+    print("[startup] TTS engines available: Edge TTS")
     if OPENROUTER_API_KEY:
         print(f"[startup] OpenRouter: configured ({redact(OPENROUTER_API_KEY)})")
     else:
-        print("[startup] OpenRouter: not configured (local NLLB-200 only)")
+        print("[startup] OpenRouter: not configured (local Helsinki-NLP only)")
 
-    env_warnings = validate_environment()
+    env_warnings = validate_environment(demo_mode=True)
     for w in env_warnings:
         print(f"[startup] {w}")

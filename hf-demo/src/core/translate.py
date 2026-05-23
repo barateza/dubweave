@@ -9,6 +9,7 @@ from src.config import (
     NLLB_SRC_LANG,
     NLLB_TGT_LANG,
     DEFAULT_OUTPUT_LANGUAGE,
+    OUTPUT_LANGUAGES,
     get_output_language_config,
     OPENROUTER_MODEL, OPENROUTER_BASE, OPENROUTER_CHUNK_SIZE, OPENROUTER_CONTEXT_SIZE
 )
@@ -98,39 +99,35 @@ def ptpt_to_ptbr(text: str) -> str:
 
 # ── NLLB-200 ────────────────────────────────────────────────────────────────
 
-_nllb_pipeline_cache: dict[tuple[str, str], Any] = {}
+# ── Helsinki-NLP ───────────────────────────────────────────────────────────
 
+_helsinki_pipeline = None
 
-def get_nllb_pipeline(logs: list, src_lang: str = NLLB_SRC_LANG, tgt_lang: str = NLLB_TGT_LANG):
-    cache_key = (src_lang, tgt_lang)
-    if cache_key in _nllb_pipeline_cache:
-        return _nllb_pipeline_cache[cache_key], logs
+def get_helsinki_pipeline(logs: list):
+    global _helsinki_pipeline
+    if _helsinki_pipeline is not None:
+        return _helsinki_pipeline, logs
     from transformers import pipeline as hf_pipeline
     import torch
-    log(f"🧠 Loading NLLB-200 ({NLLB_MODEL}) for {src_lang} → {tgt_lang}…", logs)
+    model_name = "Helsinki-NLP/opus-mt-en-ROMANCE"
+    log(f"🧠 Loading Helsinki-NLP ({model_name})…", logs)
     device = 0 if torch.cuda.is_available() else -1
-    _nllb_pipeline_cache[cache_key] = hf_pipeline(
+    _helsinki_pipeline = hf_pipeline(
         "translation",
-        model=NLLB_MODEL,
-        src_lang=src_lang,
-        tgt_lang=tgt_lang,
+        model=model_name,
         device=device,
         max_length=512,
     )
-    log(f"   NLLB-200 loaded on {'GPU' if device == 0 else 'CPU'}", logs)
-    return _nllb_pipeline_cache[cache_key], logs
+    log(f"   Helsinki-NLP loaded on {'GPU' if device == 0 else 'CPU'}", logs)
+    return _helsinki_pipeline, logs
 
-def translate_nllb(
-    texts: list[str],
-    logs: list,
-    src_lang: str = NLLB_SRC_LANG,
-    tgt_lang: str = NLLB_TGT_LANG,
-) -> tuple[list[str], list]:
-    pipe, logs = get_nllb_pipeline(logs, src_lang=src_lang, tgt_lang=tgt_lang)
+def translate_helsinki(texts: list[str], logs: list) -> tuple[list[str], list]:
+    pipe, logs = get_helsinki_pipeline(logs)
+    prefixed_texts = [f">>pt<< {t}" for t in texts]
     results = []
     batch_size = 32
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
+    for i in range(0, len(prefixed_texts), batch_size):
+        batch = prefixed_texts[i : i + batch_size]
         outputs = cast(list, pipe(batch, batch_size=min(8, len(batch))))
         results.extend(o["translation_text"] for o in outputs)
     results = [ptpt_to_ptbr(t) for t in results]
@@ -277,6 +274,15 @@ def expand_merged(merged_translated: list, original_segments: list) -> list:
             result.append({"start": original_segments[c]["start"], "end": original_segments[c]["end"], "text": " ".join(word_slice) if word_slice else "…"})
     return result
 
+output_lang_to_whisper = {
+    "Portuguese (BR)": "pt",
+    "English": "en",
+    "Spanish": "es",
+    "French": "fr",
+    "Finnish": "fi",
+    "German": "de",
+}
+
 def translate_segments(
     segments: list,
     logs: list,
@@ -286,42 +292,42 @@ def translate_segments(
     target_language: str = DEFAULT_OUTPUT_LANGUAGE,
 ) -> tuple[list, list]:
     m_cfg = merge_config or MERGE_CONFIGS["default"]
-    target_cfg = get_output_language_config(target_language)
-    target_code = target_cfg.get("whisper_code") or ""
+    target_cfg = OUTPUT_LANGUAGES.get(target_language, OUTPUT_LANGUAGES[DEFAULT_OUTPUT_LANGUAGE])
     target_label = target_language or DEFAULT_OUTPUT_LANGUAGE
     source_code = (source_lang or "").strip().lower() or None
     merged = group_for_synthesis(segments, **m_cfg)
     log(f"   Merged {len(segments)} segments → {len(merged)} utterances", logs)
     merged_texts = [u["text"] for u in merged]
-    translated_texts, primary_error = None, None
-    if source_code and target_code and source_code == target_code:
+    translated_texts = None
+
+    output_whisper = output_lang_to_whisper.get(target_label)
+    if source_code and output_whisper and source_code == output_whisper:
+        log(f"   Same language skip: {source_code} == {output_whisper}. Skipping translation.", logs)
         translated_texts = merged_texts
-    elif openrouter_key.strip():
+    elif source_code == "en" and target_label == "Portuguese (BR)":
+        log("   Routing English → Portuguese (BR) to local Helsinki-NLP translation...", logs)
+        try:
+            translated_texts, logs = translate_helsinki(merged_texts, logs)
+        except Exception as e:
+            raise RuntimeError(f"Helsinki translation failed: {e}")
+    else:
+        # Require OpenRouter key for other language pairs
+        if not openrouter_key.strip():
+            raise RuntimeError(
+                f"Translation to {target_label} requires an OpenRouter API key."
+            )
+        hint = target_cfg.get("openrouter_hint", target_label)
         try:
             translated_texts, logs = translate_openrouter(
                 merged_texts,
                 openrouter_key.strip(),
                 logs,
                 source_label=source_code,
-                target_label=target_label,
+                target_label=hint,
             )
         except Exception as e:
-            primary_error = str(e); log(f"   ⚠️  OpenRouter failed: {primary_error[:120]}", logs)
-    if translated_texts is None:
-        if target_cfg.get("supports_local_fallback") and source_code in {"en", "eng", "en-us"}:
-            try:
-                translated_texts, logs = translate_nllb(
-                    merged_texts,
-                    logs,
-                    src_lang=NLLB_SRC_LANG,
-                    tgt_lang=NLLB_TGT_LANG,
-                )
-            except Exception as e:
-                raise RuntimeError(f"All translators failed. NLLB error: {e}")
-        else:
-            raise RuntimeError(
-                f"Translation to {target_label} requires an OpenRouter API key for this language pair."
-            )
+            raise RuntimeError(f"OpenRouter translation failed: {e}")
+
     for i, (utt, txt) in enumerate(zip(merged, translated_texts)):
         merged[i] = {**utt, "text": txt.strip() if txt and txt.strip() else utt["text"]}
     translated = expand_merged(merged, segments)
