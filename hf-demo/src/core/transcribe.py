@@ -1,58 +1,15 @@
 import sys
-import queue
-import threading
 import time
 from pathlib import Path
+import soundfile as sf
+import torch
+from faster_whisper import WhisperModel
 from src.config import WHISPER_MODEL
 from src.utils.helpers import log
 
 def format_tqdm(s: str) -> str:
-    if "%|" in s:
-        parts = s.split('%|')
-        pct = parts[0].strip()
-        info_parts = parts[1].split('|')
-        if len(info_parts) > 1:
-            details = info_parts[1].strip()
-            return f"   ⏳ Transcribing: {pct}% ({details})"
+    # Retained as a pass-through for backwards compatibility with the pipeline log handlers
     return s
-
-def transcribe_audio_thread(audio_path, model_name, language, result_queue, log_queue):
-    class StderrRedirector:
-        def __init__(self, original_stderr, log_q):
-            self.original_stderr = original_stderr
-            self.log_q = log_q
-            
-        def write(self, s):
-            self.original_stderr.write(s)
-            self.original_stderr.flush()
-            parts = s.split('\r')
-            for part in parts:
-                clean = part.strip()
-                if clean:
-                    self.log_q.put(clean)
-                    
-        def flush(self):
-            self.original_stderr.flush()
-
-    original_stderr = sys.stderr
-    sys.stderr = StderrRedirector(original_stderr, log_queue)
-    
-    try:
-        import whisper
-        import torch
-        model = whisper.load_model(model_name)
-        result = model.transcribe(
-            str(audio_path),
-            language=language,
-            word_timestamps=True,
-            verbose=False,
-            fp16=torch.cuda.is_available()
-        )
-        result_queue.put(("success", result))
-    except Exception as e:
-        result_queue.put(("error", e))
-    finally:
-        sys.stderr = original_stderr
 
 def transcribe_audio(
     audio_path: Path,
@@ -60,25 +17,64 @@ def transcribe_audio(
     model_name: str = WHISPER_MODEL,
     language: str | None = None,
 ):
-    """Transcribe audio with Whisper in a separate thread, yielding real-time logs."""
-    log_q = queue.Queue()
-    res_q = queue.Queue()
-    
-    thread = threading.Thread(
-        target=transcribe_audio_thread,
-        args=(audio_path, model_name, language, res_q, log_q)
-    )
-    thread.start()
-    
-    while thread.is_alive() or not res_q.empty():
-        while not log_q.empty():
-            yield ("log", log_q.get())
-        time.sleep(0.5)
+    """Transcribe audio with faster-whisper, yielding real-time logs."""
+    try:
+        # Get total duration of the WAV audio file for accurate progress reporting
+        total_duration = 1.0
+        try:
+            info = sf.info(str(audio_path))
+            total_duration = info.duration
+        except Exception:
+            pass
+
+        # Detect device and select best compute type
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if torch.cuda.is_available() else "int8"
+
+        yield ("log", f"   Loading faster-whisper model '{model_name}' on {device.upper()} ({compute_type})…")
         
-    status, res = res_q.get()
-    if status == "error":
-        raise res
-        
-    segments = res["segments"]
-    detected_lang = res.get("language") or language or "unknown"
-    yield ("done", (segments, detected_lang))
+        # Load the model
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+
+        yield ("log", "   Transcribing audio segments…")
+
+        # Run transcription (word_timestamps=True is highly optimized in faster-whisper)
+        segments, info = model.transcribe(
+            str(audio_path),
+            language=language,
+            word_timestamps=True,
+            beam_size=5
+        )
+
+        detected_lang = info.language
+        yield ("log", f"   Detected language: {detected_lang} (probability: {info.language_probability:.2f})")
+
+        converted_segments = []
+        for seg in segments:
+            # Yield real-time progress update
+            progress_pct = min(100, int((seg.end / total_duration) * 100))
+            yield ("log", f"   ⏳ Transcribing: {progress_pct}% ({seg.end:.1f}s / {total_duration:.1f}s)")
+
+            # Convert Segment namedtuple/class to standard dict compatible with the downstream pipeline
+            words_list = []
+            if seg.words is not None:
+                for w in seg.words:
+                    words_list.append({
+                        "word": w.word,
+                        "start": w.start,
+                        "end": w.end,
+                        "probability": w.probability
+                    })
+
+            converted_segments.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+                "words": words_list
+            })
+
+        yield ("done", (converted_segments, detected_lang))
+
+    except Exception as e:
+        yield ("log", f"❌ faster-whisper error: {e}")
+        raise e

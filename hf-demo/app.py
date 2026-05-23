@@ -8,6 +8,11 @@ os.environ.setdefault("EDGE_TTS_VOICE_NAME", "pt-BR-FranciscaNeural")
 import sys
 import logging
 import warnings
+import torch
+
+# Cap PyTorch CPU threads to 2 to prevent thread oversubscription and CPU throttling on HF Spaces (2 vCPUs)
+torch.set_num_threads(2)
+torch.set_num_interop_threads(2)
 
 # Monkey-patch gradio_client to fix the "TypeError: argument of type 'bool' is not iterable" crash
 # caused by standard Pydantic v2 schemas returning additionalProperties: bool
