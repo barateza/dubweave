@@ -10,3 +10,4 @@ torchaudio
 ffmpeg-python
 numpy
 soundfile
+sacremoses
