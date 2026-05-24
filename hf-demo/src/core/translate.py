@@ -113,6 +113,7 @@ def get_helsinki_pipeline(logs: list):
     log(f"🧠 Loading Helsinki-NLP ({model_name})…", logs)
     device = 0 if torch.cuda.is_available() else -1
     _helsinki_pipeline = hf_pipeline(
+        "translation",
         model=model_name,
         device=device,
         max_length=512,
