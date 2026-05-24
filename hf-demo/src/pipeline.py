@@ -44,12 +44,11 @@ STAGES = ["download", "transcribe", "translate", "synthesize", "assemble"]
 
 
 def lazy_import():
-    global yt_dlp, whisper, torch
+    global yt_dlp, torch
     try:
         import yt_dlp
     except ImportError:
         yt_dlp = None
-    import whisper
     import torch
     return True
 
