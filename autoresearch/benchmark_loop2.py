@@ -24,7 +24,7 @@ PROMPT_PATH  = ROOT / "translation_prompt.md"
 RESULTS_PATH = AR / "results_loop2.tsv"
 
 OPENROUTER_KEY   = os.getenv("OPENROUTER_API_KEY", "").strip()
-TRANSLATE_MODEL  = "google/gemini-2.0-flash-001"
+TRANSLATE_MODEL  = "google/gemini-2.5-flash-lite"
 JUDGE_MODEL      = "anthropic/claude-haiku-4-5"  # fast, cheap, reliable judge
 OPENROUTER_BASE  = "https://openrouter.ai/api/v1"
 

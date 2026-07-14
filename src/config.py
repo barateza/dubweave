@@ -33,7 +33,7 @@ NLLB_TGT_LANG = os.getenv("NLLB_TGT_LANG", "por_Latn")
 
 # ── OpenRouter config ────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash-lite")
 OPENROUTER_BASE = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
 
 
@@ -49,6 +49,15 @@ def _int_env(name: str, default: int) -> int:
 
 OPENROUTER_CHUNK_SIZE = max(1, _int_env("OPENROUTER_CHUNK_SIZE", 120))
 OPENROUTER_CONTEXT_SIZE = max(0, _int_env("OPENROUTER_CONTEXT_SIZE", 8))
+
+# ── Translation engine ────────────────────────────────────────────────────────
+# Options: auto | nllb | openrouter
+#   auto       = OpenRouter if a valid key is set, otherwise NLLB-200
+#   nllb       = force NLLB-200 (local) regardless of key presence
+#   openrouter = force OpenRouter (will fail if key is missing/invalid)
+TRANSLATION_ENGINE = os.getenv("TRANSLATION_ENGINE", "auto").strip().lower()
+if TRANSLATION_ENGINE not in {"auto", "nllb", "openrouter"}:
+    TRANSLATION_ENGINE = "auto"
 
 # ── Google Cloud TTS config ──────────────────────────────────────────────────
 GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY", "").strip()

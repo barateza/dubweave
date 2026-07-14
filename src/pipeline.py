@@ -113,10 +113,13 @@ def run_pipeline(
     gemini_speaker2_voice: str = GEMINI_TTS_SPEAKER2_VOICE,
     elevenlabs_voice_id: str = ELEVENLABS_TTS_VOICE_ID,
     elevenlabs_model_id: str = ELEVENLABS_TTS_MODEL_ID,
+    translation_engine: str = "auto",
     progress=gr.Progress(),
 ):
     logs = []
     openrouter_key = OPENROUTER_API_KEY
+    if "NLLB-200" in translation_engine:
+        openrouter_key = ""
     proj = project_name.strip() or "default"
 
     stage_order = {s: i for i, s in enumerate(STAGES)}

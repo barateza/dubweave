@@ -36,6 +36,7 @@ from src.config import (
     SUPERTONIC_DEFAULT_VOICE,
     SUPERTONIC_LANGUAGE_OPTIONS,
     SUPERTONIC_VOICE_OPTIONS,
+    TRANSLATION_ENGINE,
 )
 from src.utils.project import generate_srt_for_project, project_status
 from src.utils.security import list_elevenlabs_voices
@@ -221,6 +222,27 @@ def build_ui():
                 )
             cookies_file_input = gr.File(
                 label="Option B · cookies.txt", file_types=[".txt"], type="filepath"
+            )
+
+        with gr.Accordion("🌐 Translation Engine", open=False):
+            _has_openrouter = bool(OPENROUTER_API_KEY)
+            if _has_openrouter:
+                _trans_choices = [
+                    "Auto (OpenRouter → NLLB-200 fallback)",
+                    "NLLB-200 (local, no API)",
+                ]
+                _default_trans = (
+                    "NLLB-200 (local, no API)"
+                    if TRANSLATION_ENGINE == "nllb"
+                    else "Auto (OpenRouter → NLLB-200 fallback)"
+                )
+            else:
+                _trans_choices = ["NLLB-200 (local, no API)"]
+                _default_trans = "NLLB-200 (local, no API)"
+            translation_engine_input = gr.Radio(
+                choices=_trans_choices,
+                value=_default_trans,
+                label="Translation engine",
             )
 
         with gr.Accordion("🔊 TTS Engine", open=True):
@@ -521,6 +543,7 @@ def build_ui():
                 gemini_speaker2_voice_input,
                 elevenlabs_voice_input,
                 elevenlabs_model_input,
+                translation_engine_input,
             ],
             outputs=[video_output, log_output],
         )
