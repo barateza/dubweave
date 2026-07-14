@@ -17,18 +17,31 @@ from src.utils.security import redact
 def validate_environment() -> list[str]:
     """Check required tools at startup; return list of warning strings."""
     warnings_list: list[str] = []
+    system = platform.system()
 
     if shutil.which("espeak-ng") is None:
+        if system == "Darwin":
+            hint = "Install with: brew install espeak-ng"
+        elif system == "Windows":
+            hint = (
+                "Install from: https://github.com/espeak-ng/espeak-ng/releases/download/1.52.0/espeak-ng.msi "
+                "then restart your terminal."
+            )
+        else:
+            hint = "Install via your package manager (e.g. apt install espeak-ng)"
         warnings_list.append(
-            "⚠️  espeak-ng not found — Kokoro TTS will fail. "
-            "Install from: https://github.com/espeak-ng/espeak-ng/releases/download/1.52.0/espeak-ng.msi "
-            "then restart your terminal."
+            f"⚠️  espeak-ng not found — Kokoro TTS will fail. {hint}"
         )
 
     if shutil.which("ffmpeg") is None:
+        if system == "Darwin":
+            hint = "Install with: brew install ffmpeg"
+        elif system == "Windows":
+            hint = "Run setup.bat to install all dependencies."
+        else:
+            hint = "Install via your package manager (e.g. apt install ffmpeg)"
         warnings_list.append(
-            "⚠️  ffmpeg not found — video assembly will fail. "
-            "Run setup.bat to install all dependencies."
+            f"⚠️  ffmpeg not found — video assembly will fail. {hint}"
         )
 
     if shutil.which("ffprobe") is None:
@@ -55,10 +68,20 @@ def validate_environment() -> list[str]:
         import torch
 
         if not torch.cuda.is_available():
-            warnings_list.append(
-                "⚠️  CUDA not available — GPU acceleration disabled. "
-                "Ensure NVIDIA drivers are installed and `nvidia-smi` shows your GPU."
-            )
+            if system == "Darwin":
+                # macOS Apple Silicon — CUDA never available; check MPS instead
+                if torch.backends.mps.is_available():
+                    pass  # MPS is available, no need to warn
+                else:
+                    warnings_list.append(
+                        "⚠️  MPS (Metal GPU) not available — running CPU only. "
+                        "Ensure you're on Apple Silicon with macOS 12.3+ and PyTorch >= 1.12."
+                    )
+            else:
+                warnings_list.append(
+                    "⚠️  CUDA not available — GPU acceleration disabled. "
+                    "Ensure NVIDIA drivers are installed and `nvidia-smi` shows your GPU."
+                )
     except ImportError:
         warnings_list.append(
             "⚠️  PyTorch not installed — GPU acceleration unavailable."
@@ -126,12 +149,27 @@ def log_startup_info() -> None:
             vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[startup] VRAM: {vram_gb:.1f} GB")
         else:
-            print("[startup] CUDA not available — running CPU only")
+            mps_info = ""
+            if torch.backends.mps.is_available():
+                mps_info = " — MPS (Metal GPU) available"
+            print(f"[startup] CUDA not available — running CPU only{mps_info}")
     except ImportError:
         print("[startup] PyTorch not installed")
 
     print(f"[startup] Whisper model: {WHISPER_MODEL}")
-    tts_engines = ["Kokoro", "XTTS v2"]
+    tts_engines: list[str] = []
+    try:
+        from TTS.api import TTS  # noqa: F401
+
+        tts_engines.append("XTTS v2")
+    except ImportError:
+        pass
+    try:
+        from kokoro import KPipeline  # noqa: F401
+
+        tts_engines.append("Kokoro")
+    except ImportError:
+        pass
     try:
         import supertonic  # noqa: F401
 
@@ -148,6 +186,7 @@ def log_startup_info() -> None:
     else:
         print("[startup] OpenRouter: not configured (local NLLB-200 only)")
 
+    print(f"[startup] Translation: {translation_engine}", logs) if False else None  # placeholder
     env_warnings = validate_environment()
     for w in env_warnings:
         print(f"[startup] {w}")

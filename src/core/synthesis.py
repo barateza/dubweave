@@ -669,7 +669,14 @@ def synthesize_segments(
     speaker_wav: str | None = None,
 ):
     import torch
-    from TTS.api import TTS
+
+    try:
+        from TTS.api import TTS
+    except ImportError:
+        raise RuntimeError(
+            "XTTS v2 is not available on this platform. "
+            "Choose a different TTS engine (e.g. Edge TTS, Kokoro, Supertonic)."
+        )
 
     log("🔊 Loading XTTS v2…", logs)
     tts = TTS(XTTS_MODEL).to("cuda" if torch.cuda.is_available() else "cpu")
