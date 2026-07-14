@@ -11,6 +11,7 @@ from src.config import (
     KOKORO_VOICE,
     GOOGLE_TTS_API_KEY,
     GOOGLE_TTS_LANGUAGE_CODE,
+    GOOGLE_TTS_VOICE_CATALOG,
     GOOGLE_TTS_VOICE_TYPE,
     GOOGLE_TTS_VOICE_NAME,
     EDGE_TTS_VOICE_NAME,
@@ -118,7 +119,7 @@ def run_pipeline(
 ):
     logs = []
     openrouter_key = OPENROUTER_API_KEY
-    if "NLLB-200" in translation_engine:
+    if translation_engine.startswith("NLLB-200"):
         openrouter_key = ""
     proj = project_name.strip() or "default"
 
@@ -132,6 +133,17 @@ def run_pipeline(
     model_to_use = whisper_model.strip() if whisper_model.strip() else WHISPER_MODEL
     supertonic_lang = supertonic_lang.strip().lower()
     supertonic_voice = supertonic_voice.strip().upper()
+
+    # Reconcile Google TTS voice_name against voice_type to prevent
+    # Gradio queue race: if the user changed voice_type just before
+    # clicking "Dub", the queued event may carry a stale voice_name
+    # that no longer matches the updated voice_type's choices.
+    if "Google" in tts_engine:
+        valid = GOOGLE_TTS_VOICE_CATALOG.get(google_tts_voice_type, [])
+        if google_tts_voice_name not in valid and valid:
+            google_tts_voice_name = valid[0]
+        elif google_tts_voice_name not in valid:
+            google_tts_voice_name = GOOGLE_TTS_VOICE_NAME
 
     try:
         lazy_import()
