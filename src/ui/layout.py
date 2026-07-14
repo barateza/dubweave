@@ -429,15 +429,23 @@ def build_ui():
                 ],
             )
             google_voice_type_input.change(
-                fn=lambda e, t, m, gm, em: update_cost_info(e, t, m, gm, em),
+                fn=lambda e, t, v, m, gm, em: (
+                    gr.update(
+                        choices=GOOGLE_TTS_VOICE_CATALOG.get(t, []),
+                        value=v if v in GOOGLE_TTS_VOICE_CATALOG.get(t, [])
+                        else (GOOGLE_TTS_VOICE_CATALOG.get(t, [GOOGLE_TTS_VOICE_NAME])[0]),
+                    ),
+                    update_cost_info(e, t, m, gm, em),
+                ),
                 inputs=[
                     tts_engine_input,
                     google_voice_type_input,
+                    google_voice_input,
                     video_meta_state,
                     gemini_pricing_mode_input,
                     elevenlabs_model_input,
                 ],
-                outputs=cost_info_html,
+                outputs=[google_voice_input, cost_info_html],
             )
 
             gemini_pricing_mode_input.change(
