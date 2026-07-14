@@ -79,7 +79,10 @@ def lazy_import():
     import yt_dlp
     import whisper
     import torch
-    from TTS.api import TTS
+    try:
+        from TTS.api import TTS
+    except ImportError:
+        TTS = None
 
     return True
 
@@ -145,8 +148,10 @@ def run_pipeline(
             yield None, "\n".join(logs)
             ok, msg = validate_openrouter_key(openrouter_key)
             if not ok:
-                raise PipelineError("Validation", f"OpenRouter key invalid: {msg}")
-            log("   ✅ OpenRouter key valid", logs)
+                logs = log(f"   ⚠️ OpenRouter key invalid ({msg}) — continuing without it", logs)
+                openrouter_key = ""
+            else:
+                log("   ✅ OpenRouter key valid", logs)
             yield None, "\n".join(logs)
 
         if tts_engine == "Google Cloud TTS":
