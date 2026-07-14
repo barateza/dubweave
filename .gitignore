@@ -185,3 +185,6 @@ cython_debug/
 /projects
 /samples
 corpus/*_whisper.json
+/.agents/skills
+skills-lock.json
+reasonix.toml
